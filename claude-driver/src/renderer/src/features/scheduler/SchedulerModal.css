@@ -1,0 +1,395 @@
+/* 代码说明：定时触发 Modal 样式——两 Tab 布局（Claude介入 / 脚本触发） */
+
+/* ── Modal 遮罩 ── */
+.sm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Modal 容器 ── */
+.sm-modal {
+  background: var(--bg2);
+  border: 1px solid var(--bd2);
+  border-radius: 10px;
+  width: 520px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-xl);
+}
+
+/* ── 标题栏 ── */
+.sm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-xl) var(--space-2xl) var(--space-lg);
+  border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+}
+
+.sm-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--tx);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.sm-close {
+  background: none;
+  border: none;
+  color: var(--tx3);
+  font-size: var(--text-xl);
+  cursor: pointer;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+}
+.sm-close:hover {
+  color: var(--tx);
+  background: var(--bg3);
+}
+
+/* ── Tab 导航 ── */
+.sm-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+  padding: 0 var(--space-2xl);
+}
+
+.sm-tab {
+  padding: var(--space-md) var(--space-xl);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--tx2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.1s, border-color 0.1s;
+  user-select: none;
+}
+.sm-tab:hover {
+  color: var(--tx);
+}
+.sm-tab--active {
+  color: var(--or);
+  border-bottom-color: var(--or);
+  box-shadow: 0 0 3px rgba(217, 112, 74, 0.3);
+}
+
+/* ── 内容区 ── */
+.sm-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-xl) var(--space-2xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+/* ── 占位文字（脚本触发 Tab）── */
+.sm-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: var(--space-lg);
+  color: var(--tx3);
+  font-size: var(--text-base);
+  min-height: 160px;
+}
+.sm-placeholder-icon {
+  font-size: 28px;
+  opacity: 0.5;
+}
+
+/* ── 创建表单 ── */
+.sm-form {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  padding: var(--space-xl) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  flex-shrink: 0;
+}
+
+.sm-form-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tx2);
+  margin-bottom: var(--space-xs);
+}
+
+.sm-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.sm-label {
+  font-size: var(--text-xs);
+  color: var(--tx2);
+  font-weight: 600;
+}
+
+.sm-select,
+.sm-input {
+  background: var(--bg2);
+  border: 1px solid var(--bd2);
+  border-radius: 5px;
+  color: var(--tx);
+  font-size: var(--text-md);
+  padding: var(--space-sm) var(--space-lg);
+  outline: none;
+  transition: border-color 0.12s;
+  font-family: var(--font-sans);
+}
+.sm-select:focus,
+.sm-input:focus {
+  border-color: var(--or);
+}
+
+.sm-textarea {
+  background: var(--bg2);
+  border: 1px solid var(--bd2);
+  border-radius: 5px;
+  color: var(--tx);
+  font-size: var(--text-md);
+  padding: var(--space-sm) var(--space-lg);
+  outline: none;
+  resize: vertical;
+  min-height: 64px;
+  font-family: var(--font-sans);
+  transition: border-color 0.12s;
+}
+.sm-textarea:focus {
+  border-color: var(--or);
+}
+
+.sm-hint {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  margin-top: -var(--space-xs);
+}
+
+.sm-create-btn {
+  padding: var(--space-md) var(--space-xl);
+  background: var(--ord);
+  border: 1px solid var(--ord);
+  border-radius: 6px;
+  color: var(--or);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  align-self: flex-start;
+}
+.sm-create-btn:hover:not(:disabled) {
+  background: rgba(217, 112, 74, 0.2);
+  border-color: var(--or);
+}
+.sm-create-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── 错误提示 ── */
+.sm-error {
+  font-size: var(--text-sm);
+  color: var(--rd);
+}
+
+/* ── 任务列表 ── */
+.sm-list-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tx2);
+  flex-shrink: 0;
+}
+
+.sm-task-empty {
+  font-size: var(--text-md);
+  color: var(--tx3);
+  text-align: center;
+  padding: var(--space-2xl) 0;
+}
+
+.sm-task-item {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  padding: var(--space-lg) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.sm-task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.sm-task-project {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--tx);
+}
+
+.sm-task-path {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
+.sm-task-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.sm-task-interval {
+  background: rgba(91, 156, 246, 0.12);
+  color: var(--bl);
+  border-radius: 4px;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.sm-task-prompt {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-task-expire {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+}
+
+.sm-task-expire--expired {
+  color: var(--rd);
+  font-weight: 600;
+}
+
+/* ── Toggle 开关 ── */
+.sm-toggle {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.sm-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.sm-toggle-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  background: var(--bg4);
+  border: 1px solid var(--bd2);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.sm-toggle input:checked + .sm-toggle-track {
+  background: rgba(53, 201, 138, 0.25);
+  border-color: var(--gr);
+}
+.sm-toggle-track::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--tx3);
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s, background 0.2s;
+}
+.sm-toggle input:checked + .sm-toggle-track::after {
+  transform: translateX(14px);
+  background: var(--gr);
+}
+
+/* ── 删除 / 重建按钮 ── */
+.sm-task-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.sm-btn-delete {
+  background: none;
+  border: none;
+  color: var(--tx3);
+  font-size: var(--text-base);
+  cursor: pointer;
+  padding: var(--space-xs) var(--space-xs);
+  border-radius: 3px;
+  transition: color 0.1s, background 0.1s;
+}
+.sm-btn-delete:hover {
+  color: var(--rd);
+  background: rgba(232, 88, 88, 0.08);
+}
+
+.sm-btn-recreate {
+  padding: var(--space-xs) var(--space-lg);
+  border-radius: 5px;
+  border: 1px solid var(--ord);
+  background: transparent;
+  color: var(--or);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.sm-btn-recreate:hover {
+  background: var(--ord);
+}
+.sm-btn-recreate:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── 状态点 ── */
+.sm-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tx3);
+  flex-shrink: 0;
+}
+.sm-status-dot--active {
+  background: var(--gr);
+  box-shadow: 0 0 4px rgba(53, 201, 138, 0.5);
+}

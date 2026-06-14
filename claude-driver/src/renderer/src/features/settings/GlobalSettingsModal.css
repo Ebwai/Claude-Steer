@@ -1,0 +1,339 @@
+/* 代码说明：全局设置 Modal 内部样式（gsm-* 命名空间） */
+
+/* ── Tab 锚点导航 ─────────────────────────────────────────────────────────── */
+
+.gsm-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  /* 贴紧 modal-body 的 padding，撑满宽度，吸附顶部 */
+  margin: -var(--space-xl) -var(--space-2xl) var(--space-lg);
+  padding: var(--space-lg) var(--space-xl) var(--space-md);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--bd);
+  position: sticky;
+  top: -16px;
+  z-index: 10;
+}
+
+.gsm-tab {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-md);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: color var(--transition-fast), background var(--transition-fast);
+  white-space: nowrap;
+}
+
+.gsm-tab:hover {
+  color: var(--tx);
+  background: var(--bg3);
+}
+
+.gsm-tab--active {
+  color: var(--or);
+  background: var(--ord);
+}
+
+/* ── Section 容器 ──────────────────────────────────────────────────────────── */
+
+.gsm-section {
+  margin-bottom: var(--space-3xl);
+}
+
+.gsm-section:last-child {
+  margin-bottom: var(--space-md);
+}
+
+.gsm-section-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--tx);
+  margin-bottom: var(--space-xl);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--bd);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+/* ── 通用表单行 ────────────────────────────────────────────────────────────── */
+
+.gsm-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xl);
+}
+
+.gsm-field:last-child {
+  margin-bottom: 0;
+}
+
+.gsm-label {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.gsm-label-hint {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+}
+
+.gsm-input {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: var(--radius-md);
+  color: var(--tx);
+  font-size: var(--text-base);
+  font-family: var(--font-sans);
+  padding: var(--space-sm) var(--space-lg);
+  outline: none;
+  transition: border-color var(--transition-fast);
+  width: 100%;
+}
+
+.gsm-input:focus {
+  border-color: var(--or);
+}
+
+.gsm-input-row {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.gsm-input-row .gsm-input {
+  flex: 1;
+}
+
+.gsm-select {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: var(--radius-md);
+  color: var(--tx);
+  font-size: var(--text-base);
+  font-family: var(--font-sans);
+  padding: var(--space-sm) var(--space-lg);
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.gsm-select:focus {
+  border-color: var(--or);
+}
+
+/* ── 开关 toggle ────────────────────────────────────────────────────────────── */
+
+.gsm-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+}
+
+.gsm-toggle-label {
+  font-size: var(--text-base);
+  color: var(--tx);
+  flex: 1;
+}
+
+.gsm-toggle-sub {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  margin-top: 1px;
+}
+
+.gsm-toggle {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.gsm-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.gsm-toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg4);
+  border: 1px solid var(--bd2);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.gsm-toggle input:checked + .gsm-toggle-track {
+  background: var(--or);
+  border-color: var(--or);
+}
+
+.gsm-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--tx3);
+  border-radius: var(--radius-full);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.gsm-toggle input:checked + .gsm-toggle-track::after {
+  transform: translateX(14px);
+  background: white;
+}
+
+/* ── 按钮 ────────────────────────────────────────────────────────────────── */
+
+.gsm-btn {
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--bd2);
+  background: var(--bg3);
+  color: var(--tx2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.gsm-btn:hover {
+  background: var(--bg4);
+  color: var(--tx);
+  border-color: var(--or);
+}
+
+.gsm-btn--primary {
+  background: var(--or);
+  color: white;
+  border-color: var(--or);
+}
+
+.gsm-btn--primary:hover {
+  background: var(--or2);
+  border-color: var(--or2);
+}
+
+.gsm-btn--danger {
+  color: var(--rd);
+  border-color: rgba(232, 88, 88, 0.3);
+}
+
+.gsm-btn--danger:hover {
+  background: rgba(232, 88, 88, 0.08);
+  border-color: var(--rd);
+}
+
+/* ── 状态提示 ─────────────────────────────────────────────────────────────── */
+
+.gsm-status {
+  font-size: var(--text-sm);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-sm);
+}
+
+.gsm-status--ok {
+  color: var(--gr);
+  background: var(--grd);
+}
+
+.gsm-status--err {
+  color: var(--rd);
+  background: rgba(232, 88, 88, 0.08);
+}
+
+/* ── 警告提示条 ──────────────────────────────────────────────────────────── */
+
+.gsm-warn {
+  font-size: var(--text-sm);
+  color: var(--or);
+  background: var(--ord);
+  border: 1px solid var(--ord);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-lg);
+  margin-top: var(--space-sm);
+}
+
+/* ── 关于分区 ────────────────────────────────────────────────────────────── */
+
+.gsm-about-version {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--tx);
+  margin-bottom: var(--space-md);
+}
+
+.gsm-about-link {
+  font-size: var(--text-sm);
+  color: var(--or);
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-family: var(--font-sans);
+  padding: 0;
+}
+
+.gsm-about-link:hover {
+  color: var(--or2);
+}
+
+/* ── 数字输入行（Token 单价） ─────────────────────────────────────────────── */
+
+.gsm-number-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.gsm-number-row .gsm-input {
+  width: 90px;
+  flex: none;
+}
+
+.gsm-number-unit {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  white-space: nowrap;
+}
+
+/* ── 主题切换 ────────────────────────────────────────────────────────────── */
+
+.gsm-theme-row {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.gsm-theme-btn {
+  flex: 1;
+  padding: var(--space-md) 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--bd);
+  background: var(--bg3);
+  color: var(--tx2);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.gsm-theme-btn--active {
+  border-color: var(--or);
+  color: var(--or);
+  background: var(--ord);
+}

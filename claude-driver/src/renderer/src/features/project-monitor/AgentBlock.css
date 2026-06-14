@@ -1,0 +1,287 @@
+/*
+ * 代码说明：Agent Block 及其子面板样式——工具大框/经验大框/Subagent卡片/Insight卡片
+ */
+
+/* ── Agent Block 容器 ─────────────────────────────────────────────────────── */
+
+.agent-block {
+  border: 1.5px dashed var(--bd2);
+  border-radius: 7px;
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+/* ── 头部行 ───────────────────────────────────────────────────────────────── */
+
+.agent-block__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.ab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ab-agent-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ab-work-status {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ab-session-badge {
+  font-size: var(--text-xs);
+  padding: 1px var(--space-sm);
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.ab-badge-running     { color: #35C98A; border: 1px solid #35C98A; }
+.ab-badge-paused      { color: var(--or); border: 1px solid var(--or); }
+.ab-badge-interrupted,
+.ab-badge-completed   { color: var(--tx4); border: 1px solid var(--bd2); }
+
+/* ── 工具框 + 经验框并排 ─────────────────────────────────────────────────── */
+
+.agent-block__panels {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* ── 单个面板（工具 / 经验） ──────────────────────────────────────────────── */
+
+.ab-panel {
+  flex: 1;
+  border-radius: 5px;
+  padding: var(--space-sm) var(--space-md);
+  min-width: 0;
+}
+
+.ab-panel-tools {
+  border: 1px solid var(--or);
+}
+
+.ab-panel-exp {
+  border: 1px solid var(--or2);
+}
+
+.ab-panel-head {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-xs);
+}
+
+.ab-panel-tools .ab-panel-head { color: var(--or); }
+.ab-panel-exp  .ab-panel-head  { color: var(--or2); }
+
+/* ── 列布局 ───────────────────────────────────────────────────────────────── */
+
+.ab-cols {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.ab-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.ab-col-head {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  font-weight: 600;
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--bd);
+  margin-bottom: 1px;
+}
+
+.ab-col-empty {
+  font-size: var(--text-sm);
+  color: var(--tx4);
+  padding: 1px 0;
+}
+
+.ab-col-more {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  padding-top: 1px;
+}
+
+/* ── 工具/经验条目 ──────────────────────────────────────────────────────── */
+
+.ab-tool-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+  line-height: 1.3;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ab-tool-bullet {
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+  color: var(--tx4);
+}
+
+.ab-tool-name {
+  color: var(--tx2);
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.ab-tool-desc {
+  color: var(--tx4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+
+/* running：琥珀色闪烁 */
+@keyframes amber-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+.ab-tool-running .ab-tool-name,
+.ab-tool-running .ab-tool-spinner {
+  color: #c98a35;
+  animation: amber-blink 1s ease-in-out infinite;
+}
+
+.ab-tool-spinner {
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+
+/* failed：红色 */
+.ab-tool-failed .ab-tool-name { color: #e05a5a; }
+
+.ab-tool-fail {
+  font-size: var(--text-xs);
+  color: #e05a5a;
+  flex-shrink: 0;
+}
+
+/* done：正常色淡化 */
+.ab-tool-done .ab-tool-name { color: var(--tx3); }
+
+/* ── Subagent 状态卡片 ─────────────────────────────────────────────────────── */
+
+.ab-subagent-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--pu);
+  border-radius: 5px;
+  font-size: var(--text-sm);
+}
+
+.ab-subagent-badge {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--pu);
+  border: 1px solid var(--pu);
+  border-radius: 3px;
+  padding: 0 var(--space-xs);
+  flex-shrink: 0;
+}
+
+.ab-subagent-desc {
+  color: var(--tx3);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ab-subagent-waiting {
+  color: var(--tx4);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+
+/* ── 活跃 Insight 金色块 ─────────────────────────────────────────────────── */
+
+.ab-insight-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(201, 163, 53, 0.1);
+  border: 1px solid rgba(201, 163, 53, 0.4);
+  border-radius: 5px;
+  font-size: var(--text-sm);
+}
+
+.ab-insight-icon {
+  color: #c9a335;
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+
+.ab-insight-text {
+  color: #c9a335;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ab-insight-close {
+  background: transparent;
+  border: none;
+  color: var(--tx4);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: 0;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.ab-insight-close:hover { color: var(--tx2); }
+
+/* ── msgbar Agent 标识行 ─────────────────────────────────────────────────── */
+
+.msgbar-agent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-lg) 0;
+}
+
+.msgbar-agent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.msgbar-agent-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}

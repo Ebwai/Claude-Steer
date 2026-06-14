@@ -1,0 +1,21 @@
+[
+ {
+  "name": "code-simplifier",
+  "description": "Official Anthropic built-in code optimization and context-reduction tool. It analyzes source files to remove redundant logics, dead loops, verbose boilerplates, and oversized comments without altering core behavioral logic. Use this skill when your codebase hits LLM context windows, during heavy refactoring, or when you need to condense large legacy script architectures into clean, clean-cut implementations.",
+  "tags": ["refactoring", "clean-code", "optimization", "context-saver"],
+  "detail": "## Code Simplifier\n\nOfficial built-in extension to compress code verbosity and maximize Claude's internal reasoning density.\n\n### Core Strengths\n- **Context Compression**: Strips structural bloat to save token consumption across large files.\n- **Dead-Code Elimination**: Auto-detects unreachable routines, unused variables, and redundant wrappers.\n- **AST-Based Refactoring**: Utilizes Abstract Syntax Trees to ensure safety and behavioral consistency during shrinkage.",
+  "install": {
+    "commands": [
+      "# 1. 直接在 Claude Code 交互界面中单独调用内置插件命令进行安装（无需拉取大包）：",
+      "/plugin install code-simplifier",
+      "# 2. 本地运行依赖底层语法解析解析器（按需在各系统全局或虚拟环境安装）：",
+      "# Windows 平台依赖环境命令：",
+      "npm install -g es-minify uglify-js && pip install rope autoflake",
+      "# macOS 平台依赖环境命令：",
+      "npm install -g es-minify uglify-js && pip3 install rope autoflake",
+      "# Ubuntu/Linux 平台依赖环境命令：",
+      "sudo npm install -g es-minify uglify-js && pip3 install rope autoflake"
+    ]
+  }
+}
+]

@@ -1,0 +1,47 @@
+/*
+ * 代码说明：用户节点样式——橙色渐变头像 + 圆角药丸形式
+ */
+
+.un-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--bg2);
+  border: 1px solid var(--bd2);
+  border-radius: 18px;
+  padding: var(--space-sm) var(--space-lg) var(--space-sm) var(--space-sm);
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--tx2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.15s;
+}
+
+.un-wrap:hover {
+  transform: scale(1.03);
+}
+
+.un-avatar {
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(145deg, var(--or), #C05A3A);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+  color: #fff;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.un-name {
+  color: var(--tx2);
+}
+
+.un-arrow {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  margin-left: 1px;
+}

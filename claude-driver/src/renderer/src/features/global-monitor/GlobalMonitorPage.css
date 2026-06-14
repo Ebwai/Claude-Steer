@@ -1,0 +1,9 @@
+/*
+ * 代码说明：全局监控页面根布局——左右分割，左半 50% 画板，右半弹性填充
+ */
+
+.gm-page {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}

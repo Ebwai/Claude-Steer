@@ -1,0 +1,23 @@
+[
+{
+  "name": "openwolf",
+  "description": "An open-source optimization middleware specifically engineered for Claude Code. It intercepted localized project vectors to deliver a sharper code context while drastically reducing token overhead. Use this tool when working on massive repositories with dense cross-references, when you need to avoid hitting prompt limits during broad refactoring sessions, or when you want to accelerate Claude Code's response cycles through intelligent file tree pruning.",
+  "tags": ["hooks", "context-optimizer", "token-saver"],
+  "detail": "## OpenWolf Middleware\n\nAdvanced runtime filter and context compressor designed to sit between your local terminal environment and Claude Code.\n\n### Core Strengths\n- **Token Reduction**: Intelligently trims excessive source code representations without losing semantic awareness.\n- **Noise Filtering**: Automatically ignores non-critical file updates, temporary caches, and redundant logs to keep inputs clean.\n- **Optimized Tree Mapping**: Generates precise structural snapshots of your project layout for sharper reasoning.",
+  "install": {
+    "commands": [
+      "# 1. 跨平台通过 npm 进行一键式全局独立安装（推荐做法）：",
+      "npm install -g @cytostack/openwolf",
+      "# 2. 各平台底层系统所需的依赖补全以及二进制直接分发渠道：",
+      "# Windows 平台配置与启用命令：",
+      "openwolf init",
+      "# macOS 平台配置与底层编译依赖（需要保证 node-gyp 运行环境）：",
+      "xcode-select --install && openwolf init",
+      "# Ubuntu/Linux 平台配置与构建依赖命令：",
+      "sudo apt-get update && sudo apt-get install -y build-essential && openwolf init",
+      "# 3. 将中间件注入当前开发环境，使其开始为 Claude Code 提供加速服务：",
+      "openwolf start"
+    ]
+  }
+}
+]

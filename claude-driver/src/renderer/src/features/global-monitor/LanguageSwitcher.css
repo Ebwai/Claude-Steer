@@ -1,0 +1,39 @@
+/*
+ * 代码说明：语言切换器样式——绝对定位在全局监控页右上角
+ *           使用项目 tokens 暗色主题变量，与 RightPanel 视觉统一
+ */
+
+.ls-container {
+  position: absolute;
+  top: var(--space-md);
+  right: var(--space-md);
+  z-index: 10;
+}
+
+.ls-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg2);
+  color: var(--tx2);
+  border: 1px solid var(--bd);
+  border-radius: var(--radius-sm);
+  padding: 4px 24px 4px 10px;
+  font-size: var(--text-xs);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%239494AD'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.ls-select:hover {
+  color: var(--tx);
+  border-color: var(--bd2);
+}
+
+.ls-select:focus-visible {
+  border-color: var(--or);
+  outline: none;
+}

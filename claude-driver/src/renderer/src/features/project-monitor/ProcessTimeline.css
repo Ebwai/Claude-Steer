@@ -1,0 +1,591 @@
+/*
+ * 代码说明：进程线画布样式——CSS 滚动布局，左侧竖线时间轴 + 节点渲染
+ */
+
+/* ── 容器 ──
+   框宽 1500px；轴位于 left: 750px（正中）；
+   左侧 750px 给左向插入元素，右侧内容从 770px 开始（轴右侧 20px 留给圆点）。
+   右侧可用宽度：1500 - 770 - 16(padding-right) = 714px，足够渲染节点内容。
+*/
+/* embedded=true（在 SessionFrameNode 内）：overflow-y: visible，高度由内容撑开，框随之增长
+   embedded=false（旧的独立面板用法）：overflow-y: auto，flex:1 撑满父容器 */
+.ptl-container {
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  padding: var(--space-xl) var(--space-xl) var(--space-2xl) 770px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* 嵌入到 SessionFrameNode 内时，高度完全由内容决定 */
+.sfn-timeline-area .ptl-container {
+  overflow-y: visible !important;
+  flex: none;
+  min-height: 0;
+}
+
+/* ── 竖线时间轴：left=750px，在 1500px 框的正中 ── */
+.ptl-axis {
+  position: absolute;
+  left: 750px;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: var(--bd);
+  pointer-events: none;
+}
+
+/* ── 通用节点 ── */
+.ptl-node {
+  position: relative;
+  margin-bottom: var(--space-lg);
+}
+
+/* ── 节点圆点（连接时间轴）── */
+/* left: -var(--space-2xl) → 圆点落在 axis 上：padding-left(320) - axis(300) = 20，所以 -var(--space-2xl) 对齐轴 */
+.ptl-dot {
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ptl-dot-user {
+  background: #4A9EFF;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.3);
+}
+
+.ptl-dot-assistant {
+  background: var(--bg4);
+  border: 1.5px solid var(--bd2);
+}
+
+.ptl-dot-tool {
+  background: var(--bg4);
+  border: 1.5px solid var(--bd);
+  width: 6px;
+  height: 6px;
+}
+
+.ptl-dot-start {
+  background: #35C98A;
+  box-shadow: 0 0 0 3px rgba(53, 201, 138, 0.25);
+  width: 10px;
+  height: 10px;
+  left: -21px;   /* 比 -20px 多 1px 补偿 10px 圆点的宽度差 */
+}
+
+.ptl-dot-running {
+  background: var(--or);
+  animation: ptl-blink 1s ease-in-out infinite;
+}
+
+@keyframes ptl-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+/* ── 起始标记 ── */
+.ptl-start-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  font-style: italic;
+  padding: var(--space-xs) 0;
+}
+
+.ptl-start-dot-outer {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #35C98A;
+}
+
+/* ── 用户输入气泡 ── */
+.ptl-node-user {
+  margin-bottom: var(--space-xl);
+}
+
+.ptl-user-bubble {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  background: rgba(74, 158, 255, 0.1);
+  border: 1px solid rgba(74, 158, 255, 0.3);
+  border-radius: 6px;
+  padding: var(--space-sm) var(--space-lg);
+  max-width: 85%;
+}
+
+.ptl-user-bubble-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.ptl-user-prefix {
+  font-size: var(--text-sm);
+  color: #4A9EFF;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ptl-user-text {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Claude 回复卡片 ── */
+.ptl-assistant-card {
+  background: var(--bg2);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: var(--space-md) var(--space-lg);
+  max-width: 90%;
+}
+
+.ptl-assistant-text {
+  font-size: var(--text-sm);
+  color: var(--tx);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ptl-expand-btn {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-xs) 0 0;
+  font-family: inherit;
+  transition: color 0.12s;
+}
+
+.ptl-expand-btn:hover {
+  color: var(--or);
+}
+
+/* ── 工具调用框 ── */
+.ptl-tool-box {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-md);
+  border-radius: 5px;
+  padding: var(--space-xs) var(--space-lg);
+  font-size: var(--text-sm);
+  border: 1px solid;
+}
+
+.ptl-tool-file {
+  background: rgba(74, 158, 255, 0.06);
+  border-color: rgba(74, 158, 255, 0.3);
+  color: #4A9EFF;
+}
+
+.ptl-tool-shell {
+  background: rgba(255, 170, 50, 0.06);
+  border-color: rgba(255, 170, 50, 0.3);
+  color: var(--or);
+}
+
+.ptl-tool-web {
+  background: rgba(130, 80, 220, 0.06);
+  border-color: rgba(130, 80, 220, 0.3);
+  color: #8250DC;
+}
+
+.ptl-tool-agent {
+  background: rgba(53, 201, 138, 0.06);
+  border-color: rgba(53, 201, 138, 0.3);
+  color: #35C98A;
+}
+
+.ptl-tool-other {
+  background: var(--bg3);
+  border-color: var(--bd);
+  color: var(--tx3);
+}
+
+.ptl-tool-name {
+  font-weight: 700;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+}
+
+.ptl-tool-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+  color: inherit;
+  opacity: 0.8;
+}
+
+.ptl-tool-result {
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.ptl-tool-ok {
+  color: #35C98A;
+}
+
+.ptl-tool-error {
+  color: #E85858;
+}
+
+/* ── 运行中指示器 ── */
+.ptl-running-text {
+  font-size: var(--text-xs);
+  color: var(--or);
+  font-style: italic;
+}
+
+/* ── 等待输入指示器（Stop hook 触发后） ── */
+.ptl-dot-waiting {
+  background: #35C98A;
+  opacity: 0.6;
+}
+
+.ptl-waiting-text {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  font-style: italic;
+}
+
+/* ── 滚到底部按钮 ── */
+.ptl-scroll-btn {
+  position: fixed;
+  bottom: 60px;
+  right: 20px;
+  font-size: var(--text-sm);
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--bg3);
+  border: 1px solid var(--bd2);
+  border-radius: 20px;
+  color: var(--tx3);
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 999;
+  transition: all 0.12s;
+}
+
+.ptl-scroll-btn:hover {
+  background: var(--bg4);
+  color: var(--tx);
+}
+
+/* ── assistant 节点底部操作栏（常驻） ────────────────────── */
+
+.ptl-action-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-lg) var(--space-sm);
+  border-top: 1px solid var(--bd);
+  min-height: 24px;
+  flex-wrap: wrap;
+}
+
+.ptl-action-btn {
+  font-size: var(--text-xs);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 4px;
+  border: 1px solid var(--bd2);
+  background: transparent;
+  color: var(--tx4);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.ptl-action-btn:hover {
+  background: var(--bg3);
+  color: var(--tx2);
+}
+
+.ptl-action-btn-git {
+  border-color: rgba(53, 201, 138, 0.35);
+  color: rgba(53, 201, 138, 0.8);
+}
+.ptl-action-btn-git:hover {
+  background: rgba(53, 201, 138, 0.08);
+  color: #35C98A;
+  border-color: rgba(53, 201, 138, 0.6);
+}
+
+/* git 成功：加深绿色 */
+.ptl-action-btn-git-ok {
+  border-color: rgba(53, 201, 138, 0.7) !important;
+  color: #35C98A !important;
+  background: rgba(53, 201, 138, 0.1) !important;
+  cursor: default;
+}
+
+/* git 失败：红色边框 */
+.ptl-action-btn-git-err {
+  border-color: rgba(232, 88, 88, 0.6) !important;
+  color: rgba(232, 88, 88, 0.9) !important;
+}
+.ptl-action-btn-git-err:hover {
+  background: rgba(232, 88, 88, 0.08) !important;
+}
+
+/* git loading：旋转图标（复用 ins-spinner keyframes） */
+.ptl-action-btn-git:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+/* git 错误原因文字（按钮右侧小字） */
+.ptl-git-errmsg {
+  font-size: var(--text-xs);
+  color: rgba(232, 88, 88, 0.85);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+
+.ptl-action-btn-revert {
+  border-color: rgba(217, 112, 74, 0.35);
+  color: var(--or);
+}
+.ptl-action-btn-revert:hover {
+  background: rgba(217, 112, 74, 0.08);
+  color: var(--or);
+  border-color: rgba(217, 112, 74, 0.6);
+}
+
+.ptl-action-btn-delete-commit {
+  border-color: rgba(232, 88, 88, 0.3);
+  color: rgba(232, 88, 88, 0.7);
+}
+.ptl-action-btn-delete-commit:hover {
+  background: rgba(232, 88, 88, 0.08);
+  color: #E85858;
+  border-color: rgba(232, 88, 88, 0.55);
+}
+.ptl-action-btn-delete-commit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 危险确认按钮（删除 commit 场景，比普通确认按钮更红更醒目） */
+.ptl-confirm-danger {
+  border-color: rgba(232, 88, 88, 0.7) !important;
+  background: rgba(232, 88, 88, 0.12) !important;
+  font-weight: 600;
+}
+.ptl-confirm-danger:hover { background: rgba(232, 88, 88, 0.22) !important; }
+
+.ptl-action-btn-agent {
+  border-color: rgba(91, 155, 213, 0.35);
+  color: rgba(91, 155, 213, 0.8);
+}
+.ptl-action-btn-agent:hover {
+  background: rgba(91, 155, 213, 0.08);
+  color: #5B9BD5;
+  border-color: rgba(91, 155, 213, 0.6);
+}
+
+/* 内联确认区（回退前的"确认？是/否"） */
+.ptl-confirm-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-xs);
+  color: var(--tx3);
+}
+.ptl-confirm-yes {
+  font-size: var(--text-xs);
+  padding: 1px var(--space-sm);
+  border-radius: 3px;
+  border: 1px solid rgba(232, 88, 88, 0.5);
+  color: #E85858;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ptl-confirm-yes:hover { background: rgba(232, 88, 88, 0.1); }
+.ptl-confirm-no {
+  font-size: var(--text-xs);
+  padding: 1px var(--space-sm);
+  border-radius: 3px;
+  border: 1px solid var(--bd2);
+  color: var(--tx4);
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ptl-confirm-no:hover { background: var(--bg3); }
+
+/* 子菜单（⊕ 创建多 Agent 展开后内联显示） */
+.ptl-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-xs) var(--space-lg) var(--space-sm) var(--space-xl);
+  border-top: 1px solid var(--bd);
+}
+.ptl-submenu-item {
+  font-size: var(--text-sm);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--tx3);
+  font-family: inherit;
+  background: transparent;
+  border: none;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+.ptl-submenu-item:hover {
+  background: var(--bg3);
+  color: var(--tx);
+}
+
+/* ── btw 内联输入框 ──────────────────────────────────────── */
+.ptl-btw-input-area {
+  padding: var(--space-sm) var(--space-lg) var(--space-md);
+  border-top: 1px solid var(--bd);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.ptl-btw-textarea {
+  width: 100%;
+  min-height: 26px;
+  max-height: 120px;
+  resize: none;
+  overflow-y: auto;
+  font-size: var(--text-sm);
+  font-family: inherit;
+  line-height: 1.5;
+  color: var(--tx);
+  background: var(--bg3);
+  border: 1px solid var(--ord);
+  border-radius: 4px;
+  padding: var(--space-xs) var(--space-md);
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.12s;
+}
+.ptl-btw-textarea:focus {
+  border-color: var(--or);
+}
+.ptl-btw-textarea::placeholder {
+  color: var(--tx4);
+}
+
+.ptl-btw-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.ptl-btw-cancel {
+  font-size: var(--text-xs);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 3px;
+  border: 1px solid var(--bd2);
+  background: transparent;
+  color: var(--tx4);
+  cursor: pointer;
+  font-family: inherit;
+}
+.ptl-btw-cancel:hover { background: var(--bg3); }
+
+.ptl-btw-send {
+  font-size: var(--text-xs);
+  padding: var(--space-xs) var(--space-lg);
+  border-radius: 3px;
+  border: 1px solid var(--ord);
+  background: var(--ord);
+  color: var(--or);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+.ptl-btw-send:hover:not(:disabled) { background: rgba(217, 112, 74, 0.2); }
+.ptl-btw-send:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* 已 git 节点圆点：深蓝绿色 */
+.ptl-dot-gitted {
+  background: #1a7a6e !important;
+  border-color: #1a7a6e !important;
+  box-shadow: 0 0 0 2px rgba(26, 122, 110, 0.25);
+}
+
+/* ── user_input 节点删除预留图标 ────────────────────────── */
+.ptl-delete-placeholder {
+  font-size: var(--text-xs);
+  opacity: 0.25;
+  cursor: not-allowed;
+  margin-left: auto;
+  padding: 0 var(--space-xs);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* ── 空态 ── */
+.ptl-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  color: var(--tx4);
+  font-size: var(--text-md);
+}
+
+.ptl-empty-icon {
+  font-size: 28px;
+  color: var(--bd2);
+}
+
+.ptl-empty-sub {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  text-align: center;
+}
+
+/* ── 键盘游标 overlay 指示器 ─────────────────────────────────────────────── */
+.ptl-node--cursor {
+  position: relative;
+}
+.ptl-node--cursor::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border-left: 2px solid rgba(53, 201, 138, 0.7);
+  pointer-events: none;
+  border-radius: 2px;
+  z-index: 1;
+}
+
+/* insertion wrapper（键盘游标命中 insertion 节点时） */
+.ptl-insertion-wrapper {
+  position: relative;
+}

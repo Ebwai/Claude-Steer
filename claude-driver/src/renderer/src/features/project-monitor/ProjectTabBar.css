@@ -1,0 +1,155 @@
+/*
+ * 代码说明：项目标签栏样式——浏览器式标签 + 所有项目浮层
+ */
+
+/* ── 标签栏容器 ── */
+.ptab-bar {
+  display: flex;
+  align-items: center;
+  height: var(--bottombar-h);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--bd);
+  padding: 0 var(--space-md);
+  gap: var(--space-xs);
+  flex-shrink: 0;
+  position: relative;   /* 让下拉浮层定位参考这里 */
+  /* 不设 overflow: hidden，否则会裁切绝对定位的下拉浮层 */
+}
+
+/* ── 单个项目标签 ── */
+.ptab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0 var(--space-xl);
+  height: 100%;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: var(--tx3);
+  font-size: var(--text-sm);
+  transition: all 0.12s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.ptab:hover {
+  color: var(--tx2);
+  background: var(--bg3);
+}
+
+.ptab-active {
+  color: var(--tx);
+  border-bottom-color: var(--or);
+  background: var(--bg1);
+  box-shadow: 0 0 4px rgba(217, 112, 74, 0.2);
+}
+
+.ptab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ptab-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 分隔线 ── */
+.ptab-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--bd);
+  margin: 0 var(--space-xs);
+  flex-shrink: 0;
+}
+
+/* ── "所有项目"按钮 ── */
+.ptab-all-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.ptab-all-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-lg);
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 4px;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+
+.ptab-all-btn:hover,
+.ptab-all-btn-open {
+  background: var(--bg3);
+  color: var(--tx2);
+}
+
+/* ── 下拉浮层 ── */
+.ptab-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  background: var(--bg2);
+  border: 1px solid var(--bd2);
+  border-radius: 7px;
+  box-shadow: var(--shadow-lg);
+  z-index: 500;
+  overflow: visible;
+  padding: var(--space-xs) 0;
+}
+
+.ptab-dd-empty {
+  padding: var(--space-lg) var(--space-xl);
+  font-size: var(--text-sm);
+  color: var(--tx4);
+  text-align: center;
+}
+
+.ptab-dd-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-xl);
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.ptab-dd-item:hover {
+  background: var(--bg3);
+  color: var(--tx);
+}
+
+.ptab-dd-item-active {
+  background: var(--bg3);
+  color: var(--or);
+}
+
+.ptab-dd-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ptab-dd-badge {
+  font-size: var(--text-sm);
+  padding: 1px var(--space-sm);
+  background: rgba(53, 201, 138, 0.15);
+  color: #35C98A;
+  border-radius: 3px;
+  flex-shrink: 0;
+}

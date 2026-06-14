@@ -1,0 +1,294 @@
+/*
+ * 代码说明：初始化 SOP 模态框样式——扫描流程 + 项目认领清单
+ */
+
+/* ── 模态容器 ── */
+.init-modal {
+  background: var(--bg2);
+  border: 1px solid var(--bd2);
+  border-radius: 12px;
+  padding: var(--space-2xl);
+  width: 480px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+}
+
+/* ── 标题行 ── */
+.init-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.init-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--tx);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.init-title-icon {
+  color: var(--or);
+  font-size: var(--text-base);
+}
+
+.init-close {
+  font-size: var(--text-lg);
+  color: var(--tx3);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  transition: color 0.12s;
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.init-close:hover {
+  color: var(--tx2);
+}
+
+/* ── 描述文字 ── */
+.init-desc {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  line-height: 1.5;
+}
+
+/* ── 目录选择行 ── */
+.init-dir-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  padding: var(--space-md) var(--space-lg);
+}
+
+.init-dir-path {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.init-btn-browse,
+.init-btn-scan {
+  font-size: var(--text-sm);
+  padding: var(--space-xs) var(--space-lg);
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--bd2);
+  background: var(--bg4);
+  color: var(--tx2);
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+
+.init-btn-browse:hover:not(:disabled),
+.init-btn-scan:hover:not(:disabled) {
+  background: var(--bg3);
+  color: var(--tx);
+}
+
+.init-btn-scan {
+  background: var(--or);
+  border-color: var(--or);
+  color: #fff;
+}
+
+.init-btn-scan:hover:not(:disabled) {
+  opacity: 0.85;
+  background: var(--or);
+  color: #fff;
+}
+
+.init-btn-browse:disabled,
+.init-btn-scan:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ── 扫描结果标题 ── */
+.init-scan-header {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tx2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.init-scan-hint {
+  font-size: var(--text-sm);
+  color: var(--tx4);
+  font-weight: 400;
+}
+
+.init-scan-empty {
+  font-size: var(--text-sm);
+  color: var(--tx4);
+  font-style: italic;
+  text-align: center;
+  padding: var(--space-lg) 0;
+}
+
+/* ── 项目列表 ── */
+.init-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-height: 0;
+  max-height: 260px;
+}
+
+/* ── 项目行 ── */
+.init-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid var(--bd);
+  transition: all 0.12s;
+  background: var(--bg3);
+  user-select: none;
+}
+
+.init-row:hover {
+  border-color: var(--bd2);
+  background: var(--bg4);
+}
+
+.init-row-claimed {
+  border-color: rgba(53, 201, 138, 0.35);
+  background: rgba(53, 201, 138, 0.06);
+}
+
+.init-row-claimed:hover {
+  border-color: rgba(53, 201, 138, 0.5);
+  background: rgba(53, 201, 138, 0.1);
+}
+
+/* ── 认领 toggle 指示器 ── */
+.init-row-toggle {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: all 0.12s;
+  border: 1.5px solid var(--bd2);
+  color: var(--tx4);
+}
+
+.init-row-claimed .init-row-toggle {
+  background: rgba(53, 201, 138, 0.25);
+  border-color: rgba(53, 201, 138, 0.6);
+  color: #35C98A;
+}
+
+/* ── 项目信息 ── */
+.init-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.init-row-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--tx);
+  margin-bottom: var(--space-xs);
+}
+
+.init-row-path {
+  font-size: var(--text-sm);
+  color: var(--tx4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.init-row-git {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 3px;
+  padding: 1px var(--space-sm);
+  flex-shrink: 0;
+}
+
+/* ── 错误提示 ── */
+.init-error {
+  font-size: var(--text-sm);
+  color: #E85858;
+  background: rgba(232, 88, 88, 0.1);
+  border: 1px solid rgba(232, 88, 88, 0.3);
+  border-radius: 5px;
+  padding: var(--space-sm) var(--space-lg);
+}
+
+/* ── 底部按钮行 ── */
+.init-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--bd);
+}
+
+.init-btn-skip {
+  font-size: var(--text-sm);
+  padding: var(--space-sm) var(--space-xl);
+  border-radius: 7px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--bd);
+  background: var(--bg3);
+  color: var(--tx3);
+  transition: all 0.12s;
+}
+
+.init-btn-skip:hover:not(:disabled) {
+  background: var(--bg4);
+  color: var(--tx2);
+}
+
+.init-btn-confirm {
+  font-size: var(--text-sm);
+  padding: var(--space-sm) var(--space-2xl);
+  border-radius: 7px;
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: var(--or);
+  color: #fff;
+  font-weight: 600;
+  transition: opacity 0.12s;
+}
+
+.init-btn-confirm:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.init-btn-skip:disabled,
+.init-btn-confirm:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

@@ -1,0 +1,18 @@
+/*
+ * 代码说明：项目监控页面整体布局
+ */
+
+.pm-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  background: var(--bg1);
+}
+
+.pm-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}

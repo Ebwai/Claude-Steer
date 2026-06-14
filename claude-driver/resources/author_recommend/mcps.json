@@ -1,0 +1,72 @@
+[
+{
+  "name": "github",
+  "description": "Connect Claude to GitHub for managing repos, issues, PRs, Actions workflows, and code analysis through natural language. Ideal for developers who want to automate GitHub tasks without leaving their AI assistant.",
+  "tags": ["github", "git", "code", "devops"],
+  "detail": "GitHub MCP\n\nGitHub 官方 MCP Server，通过自然语言操作 GitHub 平台的仓库、Issue、PR 和 CI/CD 流程。\n\nFeatures\n- Repository Management：浏览代码、搜索文件、分析提交历史\n- Issue & PR Automation：创建、更新和管理 Issue 与 Pull Request\n- CI/CD Intelligence：监控 GitHub Actions 状态、分析构建失败、管理 Release\n- Code Analysis：查看 Dependabot 告警、安全扫描结果\n- Read-only Mode：支持 --read-only 标志，防止误操作\n\nPrerequisites\n- Claude Code installed\n- GitHub Personal Access Token（在 github.com/settings/personal-access-tokens/new 创建）\n\n注意：@modelcontextprotocol/server-github npm 包已于 2025 年 4 月废弃，请使用 Remote Server 方式。",
+  "install": {
+    "commands": [
+      "# Step 1: 前往 github.com/settings/personal-access-tokens/new 创建 PAT",
+      "",
+      "# Step 2: 将 PAT 写入 .env 文件（推荐，避免明文暴露）",
+      "# macOS / Linux:",
+      "echo 'GITHUB_PAT=your_token_here' >> .env",
+      "# Windows PowerShell:",
+      "Add-Content .env 'GITHUB_PAT=your_token_here'",
+      "",
+      "# 将 .env 和 .mcp.json 加入 .gitignore",
+      "# macOS / Linux:",
+      "echo '.env' >> .gitignore && echo '.mcp.json' >> .gitignore",
+      "# Windows PowerShell:",
+      "Add-Content .gitignore '.env'; Add-Content .gitignore '.mcp.json'",
+      "",
+      "# Step 3: 添加 Remote Server（将 YOUR_GITHUB_PAT 替换为你的实际 PAT）",
+      "# macOS / Linux:",
+      "claude mcp add github --transport http https://api.githubcopilot.com/mcp/ -H \"Authorization: Bearer YOUR_GITHUB_PAT\"",
+      "# Windows PowerShell:",
+      "$pat = 'YOUR_GITHUB_PAT'",
+      "claude mcp add github --transport http https://api.githubcopilot.com/mcp/ -H \"Authorization: Bearer $pat\"",
+      "",
+      "# Step 4: 在 Claude Code 会话中验证连接",
+      "/mcp"
+    ]
+  }
+},
+{
+  "name": "open-claude-in-chrome",
+  "description": "Open-source reimplementation of Claude in Chrome with no domain blocklist. Use it when you want Claude Code to automate any website including ones blocked by the official extension like Reddit, Robinhood, or Tinder, on any Chromium-based browser.",
+  "tags": ["browser", "automation", "chrome", "chromium"],
+  "detail": "Open Claude in Chrome MCP\n\n官方 Claude in Chrome 扩展的开源复刻版，去除域名白名单限制，支持任意 Chromium 浏览器，保留全部 18 个 MCP 工具。\n\nWhat's Different\n- 无域名限制：可访问任意网站，包括官方屏蔽的 Reddit、Robinhood 等\n- 支持所有 Chromium 浏览器：Brave、Arc、Edge 等\n- 无构建步骤：纯 JavaScript，clone 即用\n- 18 个 MCP 工具与官方完全对等\n\nInstall Steps\n1. 克隆仓库\n2. 在浏览器中打开 chrome://extensions，开启开发者模式，加载 extension/ 目录，复制扩展 ID\n3. 运行安装脚本：./install.sh YOUR_EXTENSION_ID\n4. 在 Claude Code 中注册：claude mcp add open-claude-in-chrome -- node /absolute/path/to/host/mcp-server.js\n5. 在 Claude Code 会话中运行 /mcp 验证连接\n\nTroubleshooting\n若端口 18765 被旧进程占用，执行 pkill -f node.*mcp-server，然后重新运行 install.sh，再执行 /mcp 重连。",
+  "install": {
+    "commands": [
+      "# Prerequisites: Node.js v18+, Any Chromium browser, Claude Code v2.0.73+",
+      "",
+      "# Step 1: Install dependencies",
+      "cd host",
+      "npm install",
+      "cd ..",
+      "",
+      "# Step 2: Load the extension",
+      "# Go to chrome://extensions (or brave://extensions / edge://extensions)",
+      "# Enable Developer mode, click Load unpacked and select the extension/ directory",
+      "# Copy the extension ID shown under the extension name",
+      "",
+      "# Step 3: Register native messaging",
+      "./install.sh <your-extension-id>",
+      "# If you use multiple browsers, pass all IDs:",
+      "./install.sh <chrome-id> <brave-id> <arc-id>",
+      "",
+      "# Step 4: Restart your browser",
+      "# Close all windows and reopen. The browser reads native messaging host configs on startup.",
+      "",
+      "# Step 5: Add to Claude Code (replace with your absolute path)",
+      "claude mcp add open-claude-in-chrome -- node /absolute/path/to/host/mcp-server.js",
+      "# Find the absolute path with:",
+      "echo \"node $(pwd)/host/mcp-server.js\"",
+      "",
+      "# Verification: Start a new Claude Code session and test:",
+      "# Navigate to reddit.com and take a screenshot"
+    ]
+  }
+}
+]

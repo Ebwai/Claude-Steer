@@ -1,0 +1,78 @@
+/*
+ * 代码说明：画板容器样式——50% 宽度，相对定位用于 FAB 按钮的绝对定位
+ */
+
+.canvas-panel {
+  flex: 0 0 50%;
+  position: relative;
+  border-right: 1px solid var(--bd);
+  overflow: hidden;
+}
+
+/* ReactFlow 容器——填满画板区域 */
+.canvas-flow {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* 覆盖 ReactFlow 默认背景色（确保使用设计系统的 --bg） */
+.canvas-flow .react-flow__renderer,
+.canvas-flow .react-flow__background {
+  background: var(--bg);
+}
+
+/* 隐藏 ReactFlow 节点的默认选中样式 */
+.canvas-flow .react-flow__node {
+  cursor: default;
+}
+
+.canvas-flow .react-flow__node:hover {
+  cursor: pointer;
+}
+
+/* FAB 浮动按钮组（左下角）*/
+.canvas-fabs {
+  position: absolute;
+  bottom: 12px;
+  left: 18px;
+  display: flex;
+  gap: var(--space-md);
+  z-index: 10;
+}
+
+.fab-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 20px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  font-family: var(--font-sans);
+  transition: all var(--transition-base);
+}
+
+.fab-primary {
+  background: var(--or);
+  color: #fff;
+  box-shadow: var(--shadow-md);
+}
+
+.fab-primary:hover {
+  background: var(--or2);
+  transform: scale(1.02);
+}
+
+.fab-ghost {
+  background: var(--bg2);
+  color: var(--tx2);
+  border: 1px solid var(--bd2);
+}
+
+.fab-ghost:hover {
+  background: var(--bg3);
+  color: var(--tx);
+}

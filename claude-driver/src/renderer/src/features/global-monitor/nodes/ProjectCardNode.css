@@ -1,0 +1,221 @@
+/*
+ * 代码说明：项目卡片节点样式——248px 固定宽，圆角面板，活跃状态绿色光晕
+ */
+
+.pcn-wrap {
+  background: var(--bg2);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  overflow: hidden;
+  width: 248px;
+  cursor: pointer;
+  transition: border-color 0.18s, transform 0.18s;
+}
+
+.pcn-wrap:hover {
+  transform: translateY(-2px);
+}
+
+.pcn-active {
+  border-color: rgba(53, 201, 138, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(53, 201, 138, 0.07),
+    0 4px 16px rgba(0, 0, 0, 0.24);
+}
+
+/* 卡片头部 */
+.pcn-header {
+  padding: var(--space-lg) var(--space-lg) var(--space-md);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  border-bottom: 1px solid var(--bd);
+}
+
+.pcn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.pcn-dot-run {
+  background: var(--gr);
+  box-shadow: 0 0 5px rgba(53, 201, 138, 0.5);
+  animation: pulse 1.8s infinite;}
+
+.pcn-dot-idle {
+  background: var(--tx4);
+}
+
+.pcn-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pcn-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--tx);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pcn-sub {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  margin-top: var(--space-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.pcn-running {
+  color: var(--gr);
+  font-weight: 500;
+}
+
+.pcn-hint {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 4px;
+  padding: var(--space-xs) var(--space-sm);
+  white-space: nowrap;
+  opacity: 0.6;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.pcn-wrap:hover .pcn-hint {
+  opacity: 1;
+  color: var(--or);
+  border-color: rgba(217, 112, 74, 0.3);
+}
+
+/* Plan 列表 */
+.pcn-plan {
+  padding: var(--space-sm) 0;
+}
+
+.pcn-plan-item {
+  padding: 3.var(--space-sm) var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--tx2);
+}
+
+.pcn-plan-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* 状态指示圆点 */
+.pcn-ps {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+}
+
+.pcn-ps-done {
+  background: rgba(53, 201, 138, 0.12);
+  border: 1px solid rgba(53, 201, 138, 0.32);
+  color: var(--gr);
+}
+
+.pcn-ps-doing {
+  background: var(--ord);
+  border: 1px solid rgba(217, 112, 74, 0.28);
+  position: relative;
+  overflow: visible;
+}
+
+.pcn-ps-pulse {
+  width: 5px;
+  height: 5px;
+  background: var(--or);
+  border-radius: 50%;
+  animation: pulse 1.8s infinite;
+}
+
+.pcn-ps-todo {
+  border: 1px solid var(--bd2);
+}
+
+.pcn-ptr {
+  font-size: var(--text-xs);
+  color: var(--or);
+  animation: blink 1s infinite;
+}
+
+/* 倒三角执行指示器——三种状态 */
+.pcn-ptr-active {
+  color: var(--gr);
+  animation: pcn-pulse 1.5s ease-in-out infinite;
+}
+
+.pcn-ptr-paused {
+  color: var(--tx3);
+  animation: none;
+  opacity: 0.5;
+}
+
+.pcn-ptr-completed {
+  color: var(--gr);
+  animation: none;
+  opacity: 0.35;
+}
+
+@keyframes pcn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.pcn-pl {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pcn-pl-done {
+  color: var(--tx3);
+  text-decoration: line-through;
+}
+
+.pcn-pl-doing {
+  color: var(--tx);
+  font-weight: 500;
+}
+
+.pcn-tag {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  background: var(--bg3);
+  border-radius: 3px;
+  padding: 1px var(--space-xs);
+}
+
+/* 空占位 */
+.pcn-empty {
+  padding: var(--space-md) var(--space-lg);
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  font-style: italic;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}

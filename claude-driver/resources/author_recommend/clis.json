@@ -1,0 +1,45 @@
+[
+{
+  "name": "lark-cli",
+  "description": "The official Lark/Feishu CLI tool and AI Agent Skills package maintained by the Larksuite team. It seamlessly connects Claude Code and custom AI agents with core collaborative domains including Messenger, Docs, Base, Sheets, Calendar, Mail, Tasks, and Meetings. Use this skill whenever your AI agent needs to programmatically read or write Feishu/Lark documents, update cloud spreadsheets, send instant IM messages, manage team calendars, or automate enterprise office workflows.",
+  "tags": ["lark", "feishu", "cli", "agent-skills", "office-automation"],
+  "detail": "## Lark/Feishu CLI & Agent Skills\n\nOfficial enterprise-grade automation suite empowering AI agents to interact with the entire Larksuite ecosystem natively.\n\n### Core Features\n- **Unified Office Access**: Full lifecycle control over Docs, Sheets, and Base databases with 200+ specialized commands.\n- **Agent-Ready Design**: Includes 20+ fine-tuned AI Agent Skills optimizing multi-turn tool calling for modern LLMs.\n- **Secure Workspace Integration**: Streamlined authentication protocols across enterprise tenants for instant chat, task tracking, and email routing.\n\n### System Configuration\nRequires an internal app credential (App ID and App Secret) from the Feishu/Lark Open Platform to establish secure runtime token exchanges.",
+  "install": {
+    "commands": [
+      "# 1. 跨平台一键安装 Lark/Feishu 官方全量 CLI 核心组件（内置所有 Docs、Sheets、Base 技能）：",
+      "# Windows 平台安装命令（通过 npm 或 direct binary）：",
+      "npm install -g @larksuite/cli",
+      "# macOS 平台安装命令（支持 npm 或 Homebrew 快捷通道）：",
+      "npm install -g @larksuite/cli",
+      "# Ubuntu/Linux 平台安装命令：",
+      "sudo npm install -g @larksuite/cli --unsafe-perm",
+      "# 2. 安装完成后，在各平台统一执行身份授权绑定以激活全套 AI 技能：",
+      "lark login",
+      "# 3. 将其注册至你的 AI 智能体/终端会话环境中即可开始使用内置的 docx 协作：",
+      "lark skill enable docx",
+      "# 4. lark-cli自动注册的时候会在用户目录/.claude/skills文件夹下产生大量lark开头的skills，为了整洁收纳，以及可以作为cli被本软件识别，用户目录/.claude/skills文件夹下创建一个lark-cli文件夹，然后将所有lark开头的skills移入文件夹中。"
+    ]
+  }
+},
+{
+  "name": "github-cli",
+  "description": "The official GitHub command-line tool (gh) and agent extension. It brings repositories, issues, pull requests, secrets, and GitHub Actions workflows directly into Claude Code and custom AI agent execution contexts. Use this skill when your agent needs to clone repos, check CI/CD run status, create pull requests, review code diffs, or triage issues programmatically.",
+  "tags": ["github", "git", "cli", "devops", "mcp-server"],
+  "detail": "## GitHub CLI Tool & Agent Skill\n\nOfficial GitHub automation layer providing seamless terminal and API instrumentation for repositories and workflows.\n\n### Core Features\n- **PR & Issue Lifecycle**: Create, view, merge, and close issues or pull requests directly from conversational inputs.\n- **Actions Automation**: Monitor GitHub Actions workflow status, trigger rerun dispatches, and download artifact logs.\n- **Secure Credentials Matrix**: Authenticates natively via OAuth tokens to securely interact with private and enterprise organizations.",
+  "install": {
+    "commands": [
+      "# 1. 跨平台安装 GitHub 官方独立 CLI 工具核心（根据你的本地操作系统选择对应的执行命令）：",
+      "# Windows 平台安装命令：",
+      "winget install --id GitHub.cli",
+      "# macOS 平台安装命令：",
+      "brew install gh",
+      "# Ubuntu/Linux 平台安装命令：",
+      "sudo mkdir -p -m 755 /etc/apt/keyrings && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | sudo tee /etc/apt/sources.list.di/github-cli.list > /dev/null && sudo apt update && sudo apt install gh -y",
+      "# 2. 全平台统一执行账户登录与安全授信以授权本地 Agent：",
+      "gh auth login",
+      "# 3. 如果需要为 Claude Code 或 MCP 环境添加独立的 GitHub 专属轻量级服务代理：",
+      "npm install -g @modelcontextprotocol/server-github"
+    ]
+  }
+}
+]

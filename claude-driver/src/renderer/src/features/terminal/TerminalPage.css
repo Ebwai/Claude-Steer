@@ -1,0 +1,62 @@
+/* 代码说明：独立终端窗口页面样式——全屏布局，顶部细标题栏 + xterm.js 容器 */
+
+.term-page {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* ── 标题栏（和主窗口一致的深色风格）──────────────────────────── */
+
+.term-titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: var(--topbar-h);
+  padding: 0 var(--space-lg);
+  background: var(--bg1);
+  border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+  -webkit-app-region: drag; /* 允许拖动窗口 */
+  user-select: none;
+}
+
+.term-icon {
+  font-size: var(--text-xs);
+  opacity: 0.5;
+}
+
+.term-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tx2);
+  letter-spacing: 0.05em;
+}
+
+.term-session-id {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  font-family: var(--font-mono);
+}
+
+/* ── xterm.js 容器（占满剩余高度）────────────────────────────── */
+
+.term-container {
+  flex: 1;
+  overflow: hidden;
+  padding: var(--space-xs) var(--space-sm);
+  /* xterm.js 内部会创建 canvas，必须让它填满父容器 */
+  position: relative;
+}
+
+/* xterm.js 内部元素重置（确保全屏填充）*/
+.term-container .xterm {
+  height: 100%;
+}
+
+.term-container .xterm-viewport {
+  border-radius: 0;
+}

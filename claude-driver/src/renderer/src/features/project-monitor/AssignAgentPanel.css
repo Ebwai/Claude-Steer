@@ -1,0 +1,191 @@
+/* AssignAgentPanel — 指派 Agent 面板样式
+   挂载在 ProcessTimeline AssistantActionBar 的子菜单下方 */
+
+.aap-panel {
+  background: var(--bg2, #f5f5f5);
+  border-top: 1px solid var(--border, #ddd);
+  border-left: 4px solid var(--accent, #4a9eff);
+  padding: var(--space-md) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.aap-row-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.aap-row {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-sm);
+  align-items: flex-start;
+}
+
+.aap-row-divider {
+  height: 1px;
+  background: var(--border, #ddd);
+  margin: var(--space-xs) 0;
+  opacity: 0.5;
+}
+
+/* 控件1：数量输入框 */
+.aap-count {
+  width: 36px;
+  min-width: 36px;
+  text-align: center;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 3px;
+  padding: var(--space-xs) var(--space-xs);
+  font-size: var(--text-sm);
+  background: var(--bg, #fff);
+  color: var(--tx, #333);
+}
+.aap-count:focus { outline: none; border-color: var(--accent, #4a9eff); }
+.aap-count.aap-count-err { border-color: #e55; }
+
+.aap-count-errmsg {
+  font-size: var(--text-xs);
+  color: #e55;
+  padding-left: var(--space-xs);
+  line-height: 1.3;
+}
+
+/* 控件2：Agent 名称选择器 */
+.aap-agent-select-wrap {
+  position: relative;
+  min-width: 120px;
+}
+
+.aap-agent-select {
+  width: 100%;
+  min-width: 120px;
+  border: 1px dashed var(--accent, #4a9eff);
+  border-radius: 3px;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  background: var(--bg, #fff);
+  color: var(--tx, #333);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aap-agent-select:hover { background: var(--bg2, #eef5ff); }
+
+/* 下拉面板 */
+.aap-agent-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 200;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 220px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--space-xs);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.aap-agent-group {
+  border: 1px dashed var(--border, #ccc);
+  border-radius: 3px;
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.aap-agent-group-title {
+  font-size: var(--text-xs);
+  color: var(--tx3, #999);
+  margin-bottom: var(--space-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.aap-agent-item {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-xs) var(--space-xs);
+  border-radius: 2px;
+  cursor: pointer;
+  gap: var(--space-md);
+}
+.aap-agent-item:hover { background: var(--bg2, #eef5ff); }
+
+.aap-agent-name {
+  font-size: var(--text-xs);
+  color: var(--tx, #333);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aap-agent-model {
+  font-size: var(--text-xs);
+  color: var(--tx3, #999);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.aap-agent-empty {
+  font-size: var(--text-xs);
+  color: var(--tx3, #999);
+  padding: var(--space-xs) var(--space-xs);
+  font-style: italic;
+}
+
+/* 控件3：任务描述 */
+.aap-task {
+  flex: 1;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 3px;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--text-sm);
+  background: var(--bg, #fff);
+  color: var(--tx, #333);
+  min-width: 0;
+}
+.aap-task:focus { outline: none; border-color: var(--accent, #4a9eff); }
+
+/* 底部操作行 */
+.aap-footer {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-xs);
+}
+
+.aap-add-btn {
+  font-size: var(--text-xs);
+  color: var(--accent, #4a9eff);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-xs) 0;
+}
+.aap-add-btn:hover { text-decoration: underline; }
+
+.aap-send-btn {
+  font-size: var(--text-sm);
+  padding: var(--space-xs) var(--space-xl);
+  background: var(--accent, #4a9eff);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.aap-send-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.aap-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }

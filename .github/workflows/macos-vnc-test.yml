@@ -1,0 +1,146 @@
+name: macOS VNC Interactive Test
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  vnc:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: claude-driver/package-lock.json
+
+      # ── 安装依赖 ──────────────────────────────────────────────────────
+      - name: Install npm dependencies
+        working-directory: claude-driver
+        run: npm ci
+
+      - name: Rebuild native modules for Electron
+        working-directory: claude-driver
+        run: npx electron-builder install-app-deps
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+        continue-on-error: true
+
+      # ── 开启 macOS 内置 VNC Server ─────────────────────────────────────
+      - name: Enable macOS VNC
+        run: |
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate \
+            -configure -access -on \
+            -clientopts -setvnclegacy -vnclegacy yes \
+            -clientopts -setvncpw -vncpw vnc12345 \
+            -restart -agent -privs -all
+          echo "VNC server enabled (legacy password: vnc12345)"
+
+      # ── ngrok TCP 隧道 ─────────────────────────────────────────────────
+      - name: Start ngrok tunnel
+        run: |
+          curl -sSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-arm64.tgz -o ngrok.tgz
+          tar xzf ngrok.tgz
+          ./ngrok authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+          ./ngrok tcp 5900 --log=stdout &
+          sleep 3
+          echo "ngrok tunnel started (find tcp:// URL above)"
+
+      # ── 连接提示 ─────────────────────────────────────────────────────
+      - name: Show connection instructions
+        run: |
+          echo "  VNC: find tcp://... URL in ngrok logs above"
+          echo "  Password: vnc12345"
+          echo "  TigerVNC: vncviewer -SecurityTypes=VncAuth <host>:<port>"
+          echo "  RealVNC: set Encryption=PreferOff"
+
+      # ── 构建 + 启动 Electron 应用 ─────────────────────────────────────
+      - name: Build & launch Electron app
+        working-directory: claude-driver
+        run: |
+          npm run build || echo "Build had errors (check logs)"
+          npm run dev &
+          echo "Electron dev server started"
+
+      # ── 自动化截图 + GUI 交互 ──────────────────────────────────────────
+      - name: Automated screenshots & GUI interaction
+        run: |
+          mkdir -p ~/screenshots
+
+          # 等 Electron 窗口出现
+          for i in $(seq 1 30); do
+            C=$(osascript -e 'tell app "System Events" to count (processes whose name contains "Electron")' 2>/dev/null || echo 0)
+            if [ "$C" -gt 0 ] 2>/dev/null; then echo "Electron detected at ${i}s"; break; fi
+            sleep 1
+          done
+
+          screencapture -x ~/screenshots/01-desktop.png
+          echo "--- running processes ---"
+          osascript -e 'tell app "System Events" to get name of every process whose background only is false' 2>/dev/null || true
+
+          # 激活 Electron 窗口
+          osascript -e 'tell app "System Events" to set frontmost of (first process whose name contains "Electron") to true' 2>/dev/null || true
+          sleep 3
+          screencapture -x ~/screenshots/02-window.png
+
+          # 枚举 Electron 窗口的 UI 元素（accessibility tree）
+          echo "--- UI elements ---"
+          osascript <<'OSA' 2>&1 || true
+            tell app "System Events"
+              tell (first process whose name contains "Electron")
+                set winName to name of front window
+                set winSize to size of front window
+                set winPos to position of front window
+                log "Window: " & winName & " size: " & winSize & " pos: " & winPos
+                -- enumerate first-level UI elements
+                try
+                  set elemCount to count of UI elements of front window
+                  repeat with i from 1 to elemCount
+                    set elem to UI element i of front window
+                    set eRole to role of elem
+                    set eDesc to description of elem
+                    log "  [" & i & "] " & eRole & " desc=" & eDesc
+                  end repeat
+                end try
+              end tell
+            end tell
+          OSA
+          sleep 2
+          screencapture -x ~/screenshots/03-ui.png
+
+          # 尝试点击窗口中央（激活交互区域）
+          osascript <<'OSA' 2>&1 || true
+            tell app "System Events"
+              tell (first process whose name contains "Electron")
+                set {x, y} to position of front window
+                set {w, h} to size of front window
+                -- click center of window
+                click at {x + (w div 2), y + (h div 2)}
+              end tell
+            end tell
+          OSA
+          sleep 3
+          screencapture -x ~/screenshots/04-after-click.png
+
+          echo "Done. Files:"
+          ls -la ~/screenshots/
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-screenshots
+          path: ~/screenshots/*.png
+          if-no-files-found: warn
+
+      # ── 等待手动测试 ───────────────────────────────────────────────────
+      - name: Waiting for manual testing (30 min)
+        run: sleep 1800

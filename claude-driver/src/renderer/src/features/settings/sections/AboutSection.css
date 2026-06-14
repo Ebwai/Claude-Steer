@@ -1,0 +1,140 @@
+/* 使用方法：由 AboutSection.tsx 引用 */
+/* 代码说明：版本检查与更新 UI 组件样式 */
+
+/* ── 更新状态文本 ────────────────────────────────────────── */
+.gsm-updater-status {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  margin-top: var(--space-sm);
+  line-height: 1.4;
+}
+
+.gsm-updater-status--ok {
+  color: var(--gr);
+}
+
+.gsm-updater-status--err {
+  color: var(--rd);
+}
+
+/* ── 更新进度条 ──────────────────────────────────────────── */
+.gsm-updater-progress {
+  width: 100%;
+  height: 4px;
+  background: var(--bg4);
+  border-radius: var(--radius-full);
+  margin-top: var(--space-sm);
+  overflow: hidden;
+}
+
+.gsm-updater-progress-bar {
+  height: 100%;
+  background: var(--or);
+  border-radius: var(--radius-full);
+  transition: width 0.3s ease;
+}
+
+/* ── 检查中旋转动画 ──────────────────────────────────────── */
+@keyframes updater-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.gsm-updater-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bd2);
+  border-top-color: var(--or);
+  border-radius: 50%;
+  animation: updater-spin 0.7s linear infinite;
+  margin-right: var(--space-xs);
+  vertical-align: middle;
+}
+
+/* ── 更新操作按钮行 ──────────────────────────────────────── */
+.gsm-updater-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ── 下载信息行（速度 + 大小） ───────────────────────────── */
+.gsm-updater-download-info {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  margin-top: 4px;
+}
+
+/* ── 捐赠支持区域 ───────────────────────────────────────── */
+.gsm-donate {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--bd2);
+}
+
+.gsm-donate-label {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  margin-bottom: 10px;
+}
+
+.gsm-donate-row {
+  margin-bottom: 8px;
+}
+
+.gsm-donate-coffee {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.gsm-donate-coffee-img {
+  height: 60px;
+  width: 217px;
+  border-radius: 6px;
+  transition: opacity 0.15s;
+}
+
+.gsm-donate-coffee-img:hover {
+  opacity: 0.85;
+}
+
+.gsm-donate-alipay-btn {
+  font-size: var(--text-sm);
+}
+
+/* ── 支付宝二维码弹窗 ───────────────────────────────────── */
+.gsm-alipay-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.gsm-alipay-modal {
+  background: var(--bg2);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.gsm-alipay-img {
+  max-width: 320px;
+  max-height: 480px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.gsm-alipay-close {
+  font-size: var(--text-sm);
+}

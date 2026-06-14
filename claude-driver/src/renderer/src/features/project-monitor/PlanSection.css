@@ -1,0 +1,159 @@
+/*
+ * 代码说明：执行计划折叠区样式——折叠态 30px header / 展开态最高 200px 可滚动树
+ */
+
+.plan-section {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+}
+
+.plan-section-collapsed {
+  /* 折叠态只需要 header 高度 */
+}
+
+/* ── Header ── */
+.plan-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: 32px;
+  padding: 0 var(--space-lg);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+  flex-shrink: 0;
+}
+
+.plan-header:hover {
+  background: var(--bg3);
+}
+
+.plan-header-icon {
+  font-size: var(--text-md);
+}
+
+.plan-header-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tx2);
+  flex: 1;
+}
+
+.plan-header-badge {
+  font-size: var(--text-sm);
+  padding: 1px var(--space-sm);
+  background: var(--ord);
+  color: var(--or);
+  border-radius: 3px;
+}
+
+.plan-header-toggle {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+}
+
+.plan-header-refresh {
+  font-size: var(--text-sm);
+  color: var(--tx4);
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 0.15s, transform 0.15s;
+  line-height: 1;
+}
+
+.plan-header-refresh:hover {
+  color: var(--tx2);
+}
+
+.plan-header-refreshing {
+  color: var(--accent);
+  animation: plan-spin 0.8s linear infinite;
+}
+
+@keyframes plan-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── 展开态主体 ── */
+.plan-body {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+}
+
+.plan-loading,
+.plan-empty {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  padding: var(--space-md) var(--space-xs);
+  text-align: center;
+}
+
+/* ── 树节点 ── */
+.plan-node {
+  margin-bottom: 1px;
+}
+
+.plan-node-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-xs);
+  border-radius: 4px;
+  font-size: var(--text-sm);
+  transition: background 0.1s;
+}
+
+.plan-node-header:hover {
+  background: var(--bg3);
+}
+
+.plan-node-icon {
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+}
+
+.plan-node-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.plan-node-toggle {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  flex-shrink: 0;
+}
+
+/* 状态颜色 */
+.plan-status-done .plan-node-icon,
+.plan-status-done .plan-node-title {
+  color: #35C98A;
+}
+
+.plan-status-blocked .plan-node-icon,
+.plan-status-blocked .plan-node-title {
+  color: var(--or);
+}
+
+.plan-status-todo .plan-node-icon,
+.plan-status-todo .plan-node-title {
+  color: var(--tx3);
+}
+
+/* 深度缩进 */
+.plan-node-depth-0 > .plan-node-header {
+  font-weight: 700;
+  font-size: var(--text-sm);
+}
+
+.plan-node-children {
+  padding-left: var(--space-xl);
+}

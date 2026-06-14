@@ -1,0 +1,77 @@
+name: Build & Package
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          # - os: macos-latest
+          #   target: mac
+          #   artifact: '*.dmg'
+          - os: ubuntu-latest
+            target: linux
+            artifact: '*.AppImage'
+          - os: windows-latest
+            target: win
+            artifact: '*-setup.exe'
+
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        working-directory: claude-driver
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: claude-driver/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild native modules for Electron
+        run: npx electron-builder install-app-deps
+
+      - name: Build & Package (${{ matrix.target }})
+        run: npm run build:${{ matrix.target }}
+        # PR 构建不传 GH_TOKEN，electron-builder 只打包不发布
+        # push/tag 构建传 GH_TOKEN，自动发布到 GitHub Releases
+        # 禁用代码签名自动发现（无 Apple Developer 证书时避免 ad-hoc 签名不一致导致 macOS 崩溃）
+        # 对 Windows/Linux 无副作用
+        env:
+          GH_TOKEN: ${{ github.event_name != 'pull_request' && secrets.GITHUB_TOKEN || '' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-driver-${{ matrix.target }}
+          path: claude-driver/dist/${{ matrix.artifact }}
+          if-no-files-found: error
+
+      - name: Upload update metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-metadata-${{ matrix.target }}
+          path: |
+            claude-driver/dist/latest.yml
+            claude-driver/dist/latest-mac.yml
+            claude-driver/dist/latest-linux.yml
+          if-no-files-found: ignore

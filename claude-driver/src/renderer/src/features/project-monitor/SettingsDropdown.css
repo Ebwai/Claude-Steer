@@ -1,0 +1,96 @@
+/*
+ * 代码说明：设置栏下拉浮层样式——绝对定位浮层，z-index:300，圆角暗色面板
+ */
+
+.sdrop-panel {
+  position: fixed;
+  z-index: 300;
+  background: var(--bg3);
+  border: 1px solid var(--bd2);
+  border-radius: 7px;
+  box-shadow: var(--shadow-lg);
+  min-width: 180px;
+  max-width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-xs) 0;
+}
+
+.sdrop-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sdrop-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  cursor: pointer;
+  transition: background 0.1s;
+  user-select: none;
+}
+
+.sdrop-item:hover {
+  background: var(--bg4);
+}
+
+.sdrop-item-active {
+  background: var(--ord);
+}
+
+.sdrop-item input[type="radio"],
+.sdrop-item input[type="checkbox"] {
+  margin-top: var(--space-xs);
+  flex-shrink: 0;
+  accent-color: var(--or);
+}
+
+.sdrop-label {
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  flex-shrink: 0;
+}
+
+.sdrop-desc {
+  font-size: var(--text-sm);
+  color: var(--tx4);
+  margin-left: auto;
+  text-align: right;
+  max-width: 120px;
+  line-height: 1.3;
+}
+
+.sdrop-empty {
+  padding: var(--space-md) var(--space-lg);
+  font-size: var(--text-sm);
+  color: var(--tx4);
+  font-style: italic;
+}
+
+/* 分组标题（grouped-checkbox 模式） */
+.sdrop-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.sdrop-group-header {
+  padding: var(--space-sm) var(--space-lg) var(--space-xs) var(--space-xl);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tx4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-top: 1px solid var(--bd);
+  border-left: 2px solid var(--or);
+  margin-top: var(--space-xs);
+}
+
+.sdrop-group:first-child .sdrop-group-header {
+  border-top: none;
+  margin-top: 0;
+}
+
+.sdrop-item-indented {
+  padding-left: var(--space-2xl);
+}

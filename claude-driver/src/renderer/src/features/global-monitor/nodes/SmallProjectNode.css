@@ -1,0 +1,60 @@
+/*
+ * 代码说明：紧凑项目节点样式——155px 宽，单行显示项目名和状态
+ */
+
+.spn-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--bg2);
+  border: 1px solid var(--bd);
+  border-radius: 7px;
+  width: 155px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.spn-wrap:hover {
+  background: var(--bg3);
+  border-color: var(--bd2);
+}
+
+.spn-pending {
+  background: rgba(248, 195, 130, 0.05);
+  border-color: rgba(248, 195, 130, 0.18);
+}
+
+.spn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.spn-dot-idle {
+  background: var(--tx4);
+}
+
+.spn-dot-warn {
+  background: #f8c382;
+}
+
+.spn-name {
+  flex: 1;
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--tx2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spn-name-warn {
+  color: #f8c382;
+}
+
+.spn-arrow {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+}

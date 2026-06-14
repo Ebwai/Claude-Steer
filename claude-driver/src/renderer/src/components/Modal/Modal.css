@@ -1,0 +1,82 @@
+/* 代码说明：Modal 全局遮罩弹窗样式——还原 demo .modal-backdrop + .soul-modal 结构 */
+
+/* 遮罩层（Portal 挂载到 body） */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.50);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+  animation: modal-fade-in 0.12s ease;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 弹窗内容区 */
+.modal-box {
+  background: var(--bg2);
+  border: 1px solid var(--ord);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  animation: modal-slide-in 0.15s ease;
+  overflow: hidden;
+}
+
+@keyframes modal-slide-in {
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* 标题栏 */
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2xl) var(--space-2xl) var(--space-xl);
+  border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--tx);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+/* 关闭按钮 */
+.modal-close {
+  font-size: var(--text-xl);
+  color: var(--tx3);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: var(--font-sans);
+  transition: color var(--transition-fast);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: var(--tx2);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 内容区（可滚动） */
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2xl) var(--space-2xl);
+}

@@ -1,0 +1,283 @@
+/*
+ * 代码说明：SubagentBlock——嵌入 ProcessTimeline 的独立 Subagent 视图
+ *
+ * 布局位置：紧跟"分配任务"插入线之后，margin-left:-var(--space-2xl) 使框左边对齐时间轴
+ *
+ * 内部坐标系（与外部 ptl-container 完全独立）：
+ *   框宽: 100%（填满 ptl-container 内容区，≈420px）
+ *   sab-axis: 竖线，position:absolute left:20px
+ *   内容区 padding-left: 40px（轴右侧 var(--space-2xl) 开始）
+ *   LineInsertionItem 在此区域内：
+ *     覆盖 --ins-padding-left:40px / --ins-axis-left:var(--space-2xl)
+ *     ins-right: margin-left:-var(--space-2xl)（内容区起点推回到轴）
+ *     ins-left:  margin-left:-40px; width:var(--space-2xl)（badge+line 靠右贴轴）
+ */
+
+/* ── 外壳：定位通过 inline style 动态注入（margin-left, width 由 ProcessTimeline 计算）──
+ *
+ * 对应 Agent badge（160px content + var(--space-lg) padding + var(--space-xs) border + var(--space-sm) margin = 180px 总宽）：
+ *   width: 180px（与 badge 等宽）
+ *   margin-left（inline）= -200 - customWidth（相对内容流 x=470，对齐 badge 左边）
+ *
+ * 内部 CSS 变量覆盖只作用于子元素（LineInsertionItem）：
+ *   --ins-padding-left: 40px  sab-timeline-body padding-left
+ *   --ins-axis-left: 20px     sab-axis left
+ *   --ins-axis-gap: var(--space-2xl)      内容起点到轴的间距
+ */
+
+.sab-block {
+  border: 1px solid var(--ord);
+  border-radius: 6px;
+  background: var(--or-subtle);
+  overflow: visible;
+  /* width & margin-left 由 inline style 注入 */
+  /* 与 ins-badge-agent 总宽对齐：320px content + var(--space-lg) padding + var(--space-xs) border + var(--space-sm) margin = 340px */
+  width: 340px;
+  margin-top: var(--space-xs);
+  margin-bottom: var(--space-sm);
+  /* 内部坐标系变量覆盖（仅影响子元素）*/
+  --ins-padding-left: 40px;
+  --ins-axis-left: 20px;
+  --ins-axis-gap: calc(var(--ins-padding-left) - var(--ins-axis-left));  /* = 20px，用 calc 确保等于坐标差值 */
+}
+
+/* ── 折叠头部 ────────────────────────────────────────────── */
+
+.sab-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg) var(--space-sm) var(--space-xl);
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.sab-header:hover {
+  background: var(--or-subtle);
+}
+
+.sab-header-open {
+  border-bottom-color: var(--ord);
+}
+
+.sab-icon {
+  font-size: var(--text-sm);
+  color: var(--or);
+  flex-shrink: 0;
+}
+
+.sab-label {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--or);
+  flex-shrink: 0;
+}
+
+.sab-desc {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.sab-count {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  flex-shrink: 0;
+}
+
+.sab-toggle {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  flex-shrink: 0;
+  margin-left: var(--space-xs);
+}
+
+/* ── 时间线主体（独立坐标系）────────────────────────────────── */
+
+.sab-timeline-body {
+  position: relative;
+  /* padding-left = --ins-padding-left = 40px，内容从轴右侧 var(--space-2xl) 开始 */
+  padding: var(--space-md) var(--space-lg) var(--space-lg) 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: visible;
+}
+
+/* 竖线时间轴（position:absolute left:20px）*/
+.sab-axis {
+  position: absolute;
+  left: 20px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ord);
+  pointer-events: none;
+}
+
+/* ── 节点通用 ────────────────────────────────────────────── */
+
+.sab-node {
+  position: relative;
+  margin-bottom: var(--space-sm);
+}
+
+/* 圆点，left: -20px 对准 sab-axis */
+.sab-dot {
+  position: absolute;
+  left: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sab-dot-user {
+  background: #4A9EFF;
+  box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.25);
+}
+
+.sab-dot-assistant {
+  background: var(--bg4);
+  border: 1.5px solid var(--bd2);
+}
+
+.sab-dot-tool {
+  background: var(--bg4);
+  border: 1.5px solid var(--bd);
+  width: 5px;
+  height: 5px;
+}
+
+@keyframes sab-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.sab-dot-running {
+  background: var(--or);
+  animation: sab-blink 1s ease-in-out infinite;
+  left: -20px;
+}
+
+/* ── 用户输入气泡 ────────────────────────────────────────── */
+
+.sab-node-user { margin-bottom: var(--space-md); }
+
+.sab-user-bubble {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  background: rgba(74, 158, 255, 0.08);
+  border: 1px solid rgba(74, 158, 255, 0.2);
+  border-radius: 5px;
+  padding: var(--space-xs) var(--space-lg);
+  max-width: 90%;
+}
+
+.sab-user-prefix {
+  font-size: var(--text-xs);
+  color: #4A9EFF;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.sab-user-text {
+  font-size: var(--text-xs);
+  color: var(--tx2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Assistant 回复卡片 ──────────────────────────────────── */
+
+.sab-assistant-card {
+  background: var(--bg2);
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+  padding: var(--space-sm) var(--space-lg);
+  max-width: 92%;
+}
+
+.sab-assistant-text {
+  font-size: var(--text-xs);
+  color: var(--tx);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sab-expand-btn {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-xs) 0 0;
+  font-family: inherit;
+  transition: color 0.12s;
+}
+
+.sab-expand-btn:hover { color: var(--or); }
+
+/* ── 工具调用行（JSONL tool_use 节点）─────────────────────── */
+
+.sab-node-tool { margin-bottom: var(--space-xs); }
+
+.sab-tool-box {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  border-radius: 4px;
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--text-sm);
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  color: var(--tx3);
+}
+
+.sab-tool-name {
+  font-weight: 700;
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+  color: var(--tx2);
+}
+
+.sab-tool-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.sab-tool-result {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.sab-tool-ok    { color: #35C98A; }
+.sab-tool-error { color: #E85858; }
+
+/* ── 空态/执行中 ─────────────────────────────────────────── */
+
+.sab-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-xs) 0;
+}
+
+.sab-running-text {
+  font-size: var(--text-sm);
+  color: var(--or);
+  font-style: italic;
+}

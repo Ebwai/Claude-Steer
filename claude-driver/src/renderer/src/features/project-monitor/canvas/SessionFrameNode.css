@@ -1,0 +1,184 @@
+/*
+ * 代码说明：SessionFrameNode 样式——@xyflow 自定义 Node 的虚线框外壳 + 头部 + 内容 + 底部按钮组
+ */
+
+/* ── 框外壳 ──────────────────────────────────────────────────────────────── */
+
+.sfn-frame {
+  display: flex;
+  flex-direction: column;
+  width: 1500px;
+  min-height: 200px;
+  border: 1.5px dashed var(--bd);
+  border-radius: 8px;
+  background: var(--bg1);
+  overflow: visible; /* SubagentBlock 向左伸出时不裁切 */
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.sfn-frame-selected {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
+}
+
+/* ── 框头部 ──────────────────────────────────────────────────────────────── */
+
+.sfn-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--bd);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+
+.sfn-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.sfn-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+/* 状态圆点 */
+.sfn-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+@keyframes sfn-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.65; transform: scale(1.25); }
+}
+
+.sfn-dot-running {
+  animation: sfn-dot-pulse 1.4s ease-in-out infinite;
+}
+
+.sfn-agent-label {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.sfn-tokens {
+  font-size: var(--text-xs);
+  color: #35C98A;
+  font-weight: 600;
+}
+
+.sfn-duration {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+}
+
+/* ── 进程线内容区 ─────────────────────────────────────────────────────────── */
+/* 不设 max-height，让内容自然撑高，框随内容动态增长 */
+
+.sfn-timeline-area {
+  flex: 1;
+  min-height: 80px;
+  overflow: visible; /* SubagentBlock 向左溢出不裁切 */
+  position: relative;
+}
+
+/* 内嵌 ProcessTimeline：高度由内容决定（不强制 height:100%） */
+.sfn-timeline-area .ptl-container {
+  overflow-y: visible;   /* 高度由内容撑开，不滚动——框本身随内容增高 */
+  overflow-x: visible;   /* SubagentBlock 向左溢出不裁切 */
+  max-height: none;
+}
+
+/* ── Subagent 子时间线区 ─────────────────────────────────────────────────── */
+
+.sfn-subagents-area {
+  border-top: 1px solid var(--bd);
+  background: var(--bg1);
+  padding: var(--space-sm) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* ── 底部操作区 ──────────────────────────────────────────────────────────── */
+
+.sfn-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--bd);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+
+.sfn-footer-tokens {
+  flex: 1;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--tx-3, #888);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  letter-spacing: 0.02em;
+}
+
+.sfn-btn {
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 4px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  background: transparent;
+  transition: opacity 0.15s;
+}
+
+.sfn-btn:hover { opacity: 0.75; }
+
+.sfn-btn-interrupt {
+  border: 1px solid #e05a5a;
+  color: #e05a5a;
+}
+
+.sfn-btn-resume {
+  border: 1px solid var(--bd);
+  color: var(--tx2);
+}
+
+.sfn-btn-terminal {
+  border: 1px solid var(--ord);
+  color: var(--or);
+}
+
+.sfn-btn-merge {
+  border: 1px solid #35C98A;
+  color: #35C98A;
+  margin-left: auto;   /* 推到最右 */
+}
+
+/* ── 里程碑 badge（绝对定位，叠加在 sfn-timeline-area 左侧）── */
+.sfn-milestone-badge {
+  position: absolute;
+  left: 4px;
+  z-index: 10;
+  background: var(--pu-subtle);
+  color: var(--pu);
+  border: 1px solid var(--pu);
+  border-radius: 3px;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-xs);
+  white-space: nowrap;
+  cursor: default;
+  pointer-events: auto;
+  transition: opacity 0.15s;
+  user-select: none;
+}
+
+.sfn-milestone-badge:hover {
+  opacity: 0.75;
+  transform: scale(1.05);
+}

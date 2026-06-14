@@ -1,0 +1,362 @@
+/* 代码说明：消息通知页面——左侧请求列表 + 右侧详情面板的两列布局 */
+
+/* ── 页面容器 ── */
+.nfp-page {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ════════════════════════════════════════════════
+   左侧：请求列表
+   ════════════════════════════════════════════════ */
+
+.nfp-list {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--bd);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.nfp-list-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-lg) var(--space-lg) var(--space-md);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--tx2);
+  border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+}
+
+.nfp-list-badge {
+  background: var(--or);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 var(--space-sm);
+  line-height: 14px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+/* ── 分组标头 ── */
+.nfp-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg) var(--space-xs);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--tx2);
+  letter-spacing: 0.04em;
+}
+
+.nfp-group-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--or);
+  flex-shrink: 0;
+}
+
+/* ── 单条请求项 ── */
+.nfp-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-md) var(--space-lg) var(--space-md) var(--space-2xl);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.nfp-item:hover {
+  background: var(--bg3);
+}
+
+.nfp-item--selected {
+  background: var(--ord);
+  border-left-color: var(--or);
+}
+
+.nfp-item-tool {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tx);
+}
+
+.nfp-item-desc {
+  font-size: var(--text-xs);
+  color: var(--tx2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 190px;
+}
+
+/* ── 空状态 ── */
+.nfp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: var(--space-md);
+  color: var(--tx3);
+  font-size: var(--text-sm);
+  padding: var(--space-2xl);
+  text-align: center;
+}
+
+.nfp-empty-icon {
+  font-size: 24px;
+  opacity: 0.4;
+}
+
+/* ════════════════════════════════════════════════
+   右侧：详情面板
+   ════════════════════════════════════════════════ */
+
+.nfp-detail {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: var(--space-2xl) var(--space-2xl);
+  gap: var(--space-xl);
+}
+
+/* ── 无选中状态 ── */
+.nfp-detail-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--tx3);
+  font-size: var(--text-md);
+}
+
+/* ── 详情标题 ── */
+.nfp-detail-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.nfp-detail-agent {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--or);
+}
+
+.nfp-detail-label {
+  font-size: var(--text-md);
+  color: var(--tx2);
+}
+
+/* ── 操作描述块 ── */
+.nfp-detail-body {
+  background: var(--bg2);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: var(--space-lg) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.nfp-detail-tool {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--bl);
+  font-family: var(--font-mono);
+}
+
+.nfp-detail-desc {
+  font-size: var(--text-md);
+  color: var(--tx);
+  line-height: 1.6;
+}
+
+/* ── tool_input 折叠区 ── */
+.nfp-input-summary {
+  font-size: var(--text-xs);
+  color: var(--tx2);
+  cursor: pointer;
+  padding: var(--space-xs) 0;
+  user-select: none;
+}
+
+.nfp-input-json {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--tx2);
+  background: var(--bg3);
+  border-radius: 4px;
+  padding: var(--space-md);
+  overflow-x: auto;
+  white-space: pre;
+  margin-top: var(--space-xs);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* ── 分隔线 ── */
+.nfp-divider {
+  height: 1px;
+  background: var(--bd);
+  flex-shrink: 0;
+}
+
+/* ── 操作按钮区 ── */
+.nfp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  align-items: center;
+}
+
+.nfp-btn {
+  padding: var(--space-sm) var(--space-xl);
+  border-radius: 6px;
+  border: 1px solid;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+  background: transparent;
+}
+
+.nfp-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nfp-btn--approve {
+  color: var(--gr);
+  border-color: rgba(53, 201, 138, 0.5);
+}
+.nfp-btn--approve:hover:not(:disabled) {
+  background: var(--grd);
+  border-color: var(--gr);
+}
+
+.nfp-btn--approve-msg {
+  color: var(--bl);
+  border-color: rgba(91, 156, 246, 0.5);
+}
+.nfp-btn--approve-msg:hover:not(:disabled) {
+  background: rgba(91, 156, 246, 0.1);
+  border-color: var(--bl);
+}
+
+.nfp-btn--deny {
+  color: var(--rd);
+  border-color: rgba(232, 88, 88, 0.45);
+}
+.nfp-btn--deny:hover:not(:disabled) {
+  background: rgba(232, 88, 88, 0.08);
+  border-color: var(--rd);
+}
+
+/* ── 附加信息输入区 ── */
+.nfp-extra-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.nfp-extra-label {
+  font-size: var(--text-xs);
+  color: var(--tx2);
+}
+
+.nfp-extra-textarea {
+  background: var(--bg2);
+  border: 1px solid var(--bd2);
+  border-radius: 5px;
+  color: var(--tx);
+  font-size: var(--text-md);
+  font-family: var(--font-sans);
+  padding: var(--space-md) var(--space-lg);
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.nfp-extra-textarea:focus {
+  border-color: var(--or);
+}
+
+/* ── inline 错误提示 ── */
+.nfp-error {
+  font-size: var(--text-sm);
+  color: var(--rd);
+  padding: var(--space-xs) 0;
+}
+
+/* ── info 消息条目 ── */
+.nfp-item-info {
+  border-left: 2px solid transparent;
+}
+
+.nfp-item-info.nfp-item--selected {
+  background: rgba(91, 156, 246, 0.08);
+  border-left-color: var(--bl);
+}
+
+/* ── info 蓝色圆点 ── */
+.nfp-group-dot-info {
+  background: var(--bl);
+}
+
+/* ── 子分组标头（缩进一级）── */
+.nfp-group-header-sub {
+  padding-left: 22px;
+  opacity: 0.75;
+}
+
+/* ── info 详情：报告路径 ── */
+.nfp-info-path {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--tx3);
+  word-break: break-all;
+  padding-top: var(--space-xs);
+}
+
+/* ── info agent 蓝色标题 ── */
+.nfp-detail-agent-info {
+  color: var(--bl);
+}
+
+/* ── 打开报告按钮 ── */
+.nfp-btn--open-report {
+  color: var(--bl);
+  border-color: rgba(91, 156, 246, 0.5);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.nfp-btn--open-report:hover:not(:disabled) {
+  background: rgba(91, 156, 246, 0.1);
+  border-color: var(--bl);
+}
+
+/* ── 已读按钮 ── */
+.nfp-btn--dismiss {
+  color: var(--tx3);
+  border-color: var(--bd2);
+}
+
+.nfp-btn--dismiss:hover:not(:disabled) {
+  background: var(--bg3);
+  color: var(--tx2);
+}

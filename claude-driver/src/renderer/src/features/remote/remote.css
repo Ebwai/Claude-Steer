@@ -1,0 +1,448 @@
+/* remote.css — 远程交互 Modal 样式（rm-* 命名空间） */
+
+/* ── Modal 主体 ───────────────────────────────────────────── */
+.rm-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  padding: var(--space-xs) 0;
+}
+
+/* ── 安装状态区 ───────────────────────────────────────────── */
+.rm-install {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-xl);
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--bg3);
+}
+.rm-install-icon { font-size: var(--text-xl); }
+.rm-install-info { flex: 1; }
+.rm-install-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--tx);
+}
+.rm-install-sub {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  margin-top: var(--space-xs);
+}
+.rm-install-btn {
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: 6px;
+  border: none;
+  font-size: var(--text-md);
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--or);
+  color: #fff;
+  transition: opacity 0.15s;
+}
+.rm-install-btn:hover { opacity: 0.85; }
+.rm-cc-connect-link {
+  font-size: inherit;
+  color: var(--or);
+  text-decoration: underline;
+  cursor: pointer;
+  margin-left: 2px;
+}
+.rm-cc-connect-link:hover {
+  color: var(--or2);
+}
+.rm-install-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── 配置方式选择面板 ──────────────────────────────────────── */
+.rm-setup-guide {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+.rm-guide-back {
+  font-size: var(--text-md);
+  color: var(--tx-3);
+  cursor: pointer;
+  width: fit-content;
+  transition: color 0.15s;
+}
+.rm-guide-back:hover { color: var(--or); }
+
+.rm-guide-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--tx);
+}
+.rm-guide-desc {
+  font-size: var(--text-md);
+  color: var(--tx-2);
+  line-height: 1.5;
+}
+
+.rm-guide-card {
+  padding: var(--space-lg) var(--space-xl);
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--bg3);
+}
+.rm-guide-card-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--tx);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+.rm-guide-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rm-guide-badge.recommended {
+  background: rgba(76,175,80,0.15);
+  color: #4caf50;
+}
+.rm-guide-card-desc {
+  font-size: var(--text-sm);
+  color: var(--tx-3);
+  line-height: 1.6;
+  margin-bottom: var(--space-md);
+}
+.rm-guide-code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: var(--text-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 6px;
+  background: var(--bg1);
+  border: 1px solid var(--bg3);
+  color: var(--or);
+  user-select: all;
+  word-break: break-all;
+}
+
+/* ── 服务状态栏 ───────────────────────────────────────────── */
+.rm-status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-xl);
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--bg3);
+}
+.rm-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rm-status-dot.running  { background: #4caf50; box-shadow: 0 0 4px #4caf5088; }
+.rm-status-dot.starting { background: #ff9800; animation: rm-pulse 1s ease-in-out infinite; }
+.rm-status-dot.stopped  { background: var(--tx3); }
+
+@keyframes rm-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.rm-status-text {
+  flex: 1;
+  font-size: var(--text-base);
+  color: var(--tx);
+}
+.rm-status-btn {
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: 6px;
+  border: none;
+  font-size: var(--text-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.rm-status-btn.start {
+  background: var(--gr);
+  color: #fff;
+}
+.rm-status-btn.stop {
+  background: var(--bg3);
+  color: var(--tx);
+}
+.rm-status-btn:hover { opacity: 0.85; }
+.rm-status-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ── 日志区 ───────────────────────────────────────────────── */
+.rm-log-area {
+  background: var(--bg1);
+  border: 1px solid var(--bg3);
+  border-radius: 6px;
+  padding: var(--space-md) var(--space-lg);
+  font-size: var(--text-sm);
+  font-family: monospace;
+  color: var(--tx2);
+  max-height: 100px;
+  overflow-y: auto;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.rm-log-empty { color: var(--tx3); font-style: italic; }
+
+/* ── 项目列表 ─────────────────────────────────────────────── */
+.rm-section-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--tx2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-md);
+}
+.rm-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.rm-project-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--bg3);
+}
+.rm-project-name {
+  flex: 1;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--tx);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rm-project-badge {
+  font-size: var(--text-sm);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 10px;
+  font-weight: 500;
+}
+.rm-project-badge.configured {
+  background: rgba(76,175,80,0.15);
+  color: #4caf50;
+}
+.rm-project-badge.unconfigured {
+  background: var(--bg3);
+  color: var(--tx3);
+}
+.rm-project-cfg-btn {
+  padding: var(--space-xs) var(--space-lg);
+  border-radius: 5px;
+  border: 1px solid var(--bg3);
+  background: transparent;
+  font-size: var(--text-sm);
+  color: var(--tx2);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.rm-project-cfg-btn:hover {
+  background: var(--bg3);
+  color: var(--tx);
+}
+
+/* ── 服务状态栏 ───────────────────────────────────────────── */
+.rm-wizard { display: flex; flex-direction: column; gap: var(--space-xl); }
+
+.rm-wizard-steps {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
+}
+.rm-step-dot {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg3);
+  transition: background 0.2s;
+}
+.rm-step-dot.active  { background: var(--or); }
+.rm-step-dot.done    { background: var(--gr); }
+
+.rm-wizard-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--tx);
+  margin-bottom: var(--space-xs);
+}
+.rm-wizard-desc {
+  font-size: var(--text-md);
+  color: var(--tx2);
+  line-height: 1.6;
+}
+.rm-wizard-desc a {
+  color: var(--or);
+  text-decoration: none;
+}
+.rm-wizard-desc a:hover { text-decoration: underline; }
+
+/* 权限清单 */
+.rm-perm-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-top: var(--space-md);
+}
+.rm-perm-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 5px;
+  background: var(--bg2);
+  font-size: var(--text-md);
+}
+.rm-perm-code { font-family: monospace; color: var(--or); flex: 1; }
+.rm-perm-desc { color: var(--tx3); font-size: var(--text-sm); }
+
+/* Step4 表单 */
+.rm-form { display: flex; flex-direction: column; gap: var(--space-lg); }
+.rm-field { display: flex; flex-direction: column; gap: var(--space-xs); }
+.rm-label {
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--tx2);
+}
+.rm-label-hint {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  margin-left: var(--space-sm);
+  font-weight: 400;
+}
+.rm-input {
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 6px;
+  border: 1px solid var(--bg3);
+  background: var(--bg1);
+  color: var(--tx);
+  font-size: var(--text-base);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.rm-input:focus { border-color: var(--or); }
+
+.rm-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 6px;
+  border: 1px solid var(--bg3);
+  background: var(--bg1);
+  min-height: 36px;
+  align-items: center;
+}
+.rm-tag {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 10px;
+  background: var(--bg3);
+  font-size: var(--text-sm);
+  font-family: monospace;
+  color: var(--tx);
+}
+.rm-tag-del {
+  cursor: pointer;
+  color: var(--tx3);
+  font-size: var(--text-base);
+  line-height: 1;
+}
+.rm-tag-del:hover { color: var(--tx); }
+.rm-tag-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--text-md);
+  color: var(--tx);
+  min-width: 120px;
+  font-family: monospace;
+}
+
+.rm-select {
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 6px;
+  border: 1px solid var(--bg3);
+  background: var(--bg1);
+  color: var(--tx);
+  font-size: var(--text-base);
+  outline: none;
+  cursor: pointer;
+}
+
+.rm-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+.rm-toggle-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  cursor: pointer;
+}
+.rm-toggle-switch input { display: none; }
+.rm-toggle-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  background: var(--bg3);
+  transition: background 0.2s;
+}
+.rm-toggle-switch input:checked + .rm-toggle-track { background: var(--gr); }
+.rm-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+.rm-toggle-switch input:checked ~ .rm-toggle-thumb { transform: translateX(14px); }
+
+/* 导航按钮 */
+.rm-wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-xs);
+}
+.rm-nav-btn {
+  padding: var(--space-sm) var(--space-xl);
+  border-radius: 6px;
+  border: none;
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.rm-nav-btn.prev {
+  background: var(--bg3);
+  color: var(--tx);
+}
+.rm-nav-btn.next,
+.rm-nav-btn.save {
+  background: var(--or);
+  color: #fff;
+}
+.rm-nav-btn:hover { opacity: 0.85; }
+.rm-nav-btn:disabled { opacity: 0.4; cursor: default; }
+.rm-step-indicator { font-size: var(--text-md); color: var(--tx3); }

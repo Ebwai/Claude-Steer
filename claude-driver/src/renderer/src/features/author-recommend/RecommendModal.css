@@ -1,0 +1,248 @@
+/* 代码说明：作者推荐弹窗样式——列表/详情/安装三种视图 */
+
+/* ── 标题副文本 ── */
+.ar-title-sub {
+  color: var(--tx3);
+  font-weight: 400;
+  font-size: var(--text-xs);
+}
+
+/* ── 容器 ── */
+.ar-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-height: 200px;
+}
+
+/* ── 加载/空状态 ── */
+.ar-loading,
+.ar-empty {
+  text-align: center;
+  color: var(--tx3);
+  font-size: var(--text-sm);
+  padding: var(--space-2xl) 0;
+}
+
+/* ── 返回按钮 ── */
+.ar-back {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  padding: var(--space-xs) 0;
+  margin-bottom: var(--space-md);
+  transition: color 0.12s;
+  text-align: left;
+}
+
+.ar-back:hover {
+  color: var(--or);
+}
+
+/* ── 列表视图 ── */
+.ar-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.ar-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--bg3);
+  transition: border-color 0.12s;
+}
+
+.ar-row:hover {
+  border-color: var(--bd2);
+}
+
+.ar-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.ar-row-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tx);
+}
+
+.ar-row-desc {
+  font-size: var(--text-xs);
+  color: var(--tx2);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ar-row-tags {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.ar-tag {
+  font-size: 10px;
+  color: var(--pu);
+  background: var(--pu-subtle);
+  padding: 1px 6px;
+  border-radius: 3px;
+  line-height: 1.5;
+}
+
+.ar-row-actions {
+  display: flex;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  align-items: center;
+}
+
+/* ── 按钮 ── */
+.ar-btn {
+  font-size: var(--text-xs);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: 5px;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+
+.ar-btn-detail {
+  color: var(--tx2);
+  background: var(--bg4);
+}
+
+.ar-btn-detail:hover {
+  color: var(--tx);
+  background: var(--bd);
+}
+
+.ar-btn-install {
+  color: var(--bg);
+  background: var(--or);
+  font-weight: 600;
+}
+
+.ar-btn-install:hover {
+  background: var(--or2);
+}
+
+/* ── 详情视图 ── */
+.ar-detail {
+  display: flex;
+  flex-direction: column;
+}
+
+.ar-detail-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--tx);
+  margin-bottom: var(--space-lg);
+}
+
+.ar-detail-content {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  padding: var(--space-lg);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.ar-detail-line {
+  font-size: var(--text-xs);
+  color: var(--tx2);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 安装视图 ── */
+.ar-install {
+  display: flex;
+  flex-direction: column;
+}
+
+.ar-install-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--tx);
+  margin-bottom: var(--space-lg);
+}
+
+.ar-commands {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.ar-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.ar-cmd-text {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--tx);
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: var(--space-xs) 0;
+}
+
+.ar-cmd-copy {
+  font-size: 10px;
+  color: var(--tx3);
+  background: var(--bg4);
+  border: 1px solid var(--bd);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+
+.ar-cmd-copy:hover {
+  color: var(--tx);
+  border-color: var(--bd2);
+}
+
+.ar-cmd-copied {
+  color: var(--gr);
+  border-color: var(--gr);
+  background: var(--grd);
+}
+
+.ar-cmd-comment {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  padding: var(--space-xs) var(--space-md);
+  line-height: 1.5;
+}
+
+.ar-cmd-spacer {
+  height: var(--space-sm);
+}

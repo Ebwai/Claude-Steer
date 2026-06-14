@@ -1,0 +1,60 @@
+/* 代码说明：TruncatedList 截断列表样式 */
+
+.trunc-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.trunc-list__item {
+  line-height: 1.4;
+}
+
+/* "···N 更多" 按钮 */
+.trunc-list__more-wrap {
+  position: relative;
+}
+
+.trunc-list__more-btn {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  background: none;
+  border: none;
+  padding: var(--space-xs) var(--space-xs);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: color var(--transition-fast);
+}
+
+.trunc-list__more-btn:hover {
+  color: var(--tx2);
+}
+
+/* 展开覆盖浮层 */
+.trunc-list__overlay {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  background: var(--bg3);
+  border: 1px solid var(--bd2);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+  min-width: 160px;
+  max-width: 280px;
+  z-index: 200;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.trunc-list__overlay-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--tx3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: var(--space-xs) var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--bd);
+  margin-bottom: var(--space-xs);
+}

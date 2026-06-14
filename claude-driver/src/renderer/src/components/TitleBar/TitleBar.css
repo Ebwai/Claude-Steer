@@ -1,0 +1,96 @@
+/*
+ * 代码说明：TitleBar 样式——还原 demo .tb 结构
+ *           -webkit-app-region: drag 使标题栏可拖动窗口
+ */
+
+.titlebar {
+  height: var(--topbar-h);
+  background: var(--bg1);
+  border-bottom: 1px solid var(--bd);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-xl);
+  gap: var(--space-lg);
+  flex-shrink: 0;
+  /* Electron 拖动区域——整个标题栏可拖动 */
+  -webkit-app-region: drag;
+}
+
+/* 窗口控制按钮（非拖动区域） */
+.titlebar-wc {
+  display: flex;
+  gap: var(--space-sm);
+  -webkit-app-region: no-drag;
+}
+
+.wc-btn {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: block;
+  opacity: 0.85;
+}
+
+.wc-red    { background: #FF5F57; }
+.wc-yellow { background: #FFBD2E; }
+.wc-green  { background: #28C840; }
+
+/* Logo 图标 */
+.titlebar-logo {
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(145deg, var(--or), #C05A3A);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  box-shadow: 0 0 14px rgba(217, 112, 74, 0.25);
+  flex-shrink: 0;
+  color: #fff;
+}
+
+/* 标题文字 */
+.titlebar-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--tx2);
+  letter-spacing: 0.05em;
+}
+
+/* 弹性空白 */
+.titlebar-spacer {
+  flex: 1;
+}
+
+/* 右侧元信息区 */
+.titlebar-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-val {
+  color: var(--tx2);
+  font-weight: 500;
+}
+
+/* 运行中状态（绿色脉动点 + 计数） */
+.titlebar-running {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--gr);
+}
+
+.running-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--gr);
+  border-radius: 50%;
+  animation: pulse 1.8s infinite;
+  display: block;
+}

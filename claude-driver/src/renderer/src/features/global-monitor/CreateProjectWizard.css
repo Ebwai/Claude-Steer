@@ -1,0 +1,424 @@
+/*
+ * 代码说明：新建项目三步向导样式——覆盖右侧面板区域，与 RightPanel 同宽同高
+ */
+
+/* ── 向导外层容器（与 RightPanel 同区域）── */
+.wiz-panel {
+  flex: 1;
+  background: var(--bg1);
+  padding: var(--space-xl) var(--space-2xl) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  overflow: hidden;
+}
+
+/* ── 标题行 ── */
+.wiz-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.wiz-title {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--tx);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.wiz-title-icon {
+  color: var(--or);
+}
+
+.wiz-close {
+  font-size: var(--text-lg);
+  color: var(--tx3);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  transition: color 0.12s;
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.wiz-close:hover {
+  color: var(--tx2);
+}
+
+/* ── 步骤导航 ── */
+.wiz-stepnav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  padding: var(--space-lg) 0;
+  border-top: 1px solid var(--bd);
+  border-bottom: 1px solid var(--bd);
+}
+
+.wiz-step-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.wiz-step-active {
+  background: var(--or);
+  color: #fff;
+}
+
+.wiz-step-done {
+  background: rgba(53, 201, 138, 0.25);
+  color: #35C98A;
+  border: 1.5px solid rgba(53, 201, 138, 0.5);
+}
+
+.wiz-step-todo {
+  background: var(--bg3);
+  color: var(--tx4);
+  border: 1.5px solid var(--bd);
+}
+
+.wiz-step-label {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  margin: 0 var(--space-sm) 0 var(--space-sm);
+  white-space: nowrap;
+}
+
+.wiz-step-line {
+  flex: 1;
+  height: 1px;
+  background: var(--bd);
+  margin: 0 var(--space-xs);
+}
+
+/* ── 步骤内容区 ── */
+.wiz-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.wiz-step-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+/* ── 表单字段 ── */
+.wiz-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.wiz-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tx2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.wiz-req {
+  color: var(--or);
+}
+
+.wiz-opt {
+  font-weight: 400;
+  color: var(--tx4);
+}
+
+.wiz-label-hint {
+  font-weight: 400;
+  color: var(--tx4);
+  font-size: var(--text-sm);
+}
+
+.wiz-input {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: var(--space-md) var(--space-lg);
+  font-size: var(--text-sm);
+  color: var(--tx);
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.12s;
+  width: 100%;
+  box-sizing: border-box;
+  height: 34px;
+}
+
+.wiz-input:focus {
+  border-color: var(--or);
+}
+
+.wiz-input::placeholder {
+  color: var(--tx4);
+}
+
+.wiz-path-row {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.wiz-input-path {
+  flex: 1;
+}
+
+.wiz-btn-browse {
+  font-size: var(--text-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--bd2);
+  background: var(--bg4);
+  color: var(--tx2);
+  transition: all 0.12s;
+  flex-shrink: 0;
+}
+
+.wiz-btn-browse:hover {
+  background: var(--bg3);
+  color: var(--tx);
+}
+
+/* ── 路径预览行 ── */
+.wiz-path-preview {
+  font-size: var(--text-xs);
+  color: var(--tx3);
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+  padding: var(--space-sm) var(--space-lg);
+  display: flex;
+  gap: var(--space-sm);
+  align-items: baseline;
+  word-break: break-all;
+}
+
+.wiz-path-preview-lbl {
+  color: var(--tx4);
+  flex-shrink: 0;
+}
+
+.wiz-path-preview-val {
+  color: var(--or);
+  font-weight: 600;
+}
+
+.wiz-textarea {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: var(--space-md) var(--space-lg);
+  font-size: var(--text-sm);
+  color: var(--tx);
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.12s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.wiz-textarea:focus {
+  border-color: var(--or);
+}
+
+.wiz-textarea::placeholder {
+  color: var(--tx4);
+}
+
+.wiz-textarea-lg {
+  min-height: 140px;
+}
+
+.wiz-select {
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  padding: var(--space-md) var(--space-lg);
+  font-size: var(--text-sm);
+  color: var(--tx);
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.12s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.wiz-select:focus {
+  border-color: var(--or);
+}
+
+/* ── Step 2 布局 ── */
+.wiz-step2-icon {
+  font-size: 32px;
+  text-align: center;
+  margin-top: var(--space-md);
+}
+
+.wiz-step2-title {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--tx);
+  text-align: center;
+}
+
+.wiz-step2-desc {
+  font-size: var(--text-sm);
+  color: var(--tx3);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.wiz-step2-path {
+  font-size: var(--text-xs);
+  color: var(--tx2);
+  background: var(--bg3);
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+  padding: var(--space-sm) var(--space-lg);
+  text-align: center;
+  word-break: break-all;
+}
+
+.wiz-btn-open-folder {
+  font-size: var(--text-sm);
+  padding: var(--space-md) var(--space-xl);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--bd2);
+  background: var(--bg3);
+  color: var(--tx2);
+  transition: all 0.12s;
+  align-self: center;
+}
+
+.wiz-btn-open-folder:hover:not(:disabled) {
+  background: var(--bg4);
+  color: var(--tx);
+}
+
+.wiz-btn-open-folder:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.wiz-step2-hint {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  text-align: center;
+  font-style: italic;
+}
+
+/* ── Step 3 提示 ── */
+.wiz-step3-hint {
+  font-size: var(--text-xs);
+  color: var(--tx4);
+  line-height: 1.5;
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--bg3);
+  border-radius: 5px;
+  border: 1px solid var(--bd);
+}
+
+/* ── 错误提示 ── */
+.wiz-error {
+  font-size: var(--text-sm);
+  color: #E85858;
+  background: rgba(232, 88, 88, 0.1);
+  border: 1px solid rgba(232, 88, 88, 0.3);
+  border-left: 3px solid var(--rd);
+  border-radius: 5px;
+  padding: var(--space-sm) var(--space-lg);
+  flex-shrink: 0;
+}
+
+/* ── 底部按钮 ── */
+.wiz-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--bd);
+  flex-shrink: 0;
+}
+
+.wiz-btn-back {
+  font-size: var(--text-sm);
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--bd);
+  background: var(--bg3);
+  color: var(--tx3);
+  transition: all 0.12s;
+}
+
+.wiz-btn-back:hover:not(:disabled) {
+  color: var(--tx2);
+  background: var(--bg4);
+}
+
+.wiz-btn-next {
+  font-size: var(--text-sm);
+  padding: var(--space-sm) var(--space-xl);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: var(--bg3);
+  border: 1px solid var(--bd2);
+  color: var(--tx);
+  font-weight: 600;
+  transition: all 0.12s;
+}
+
+.wiz-btn-next:hover:not(:disabled) {
+  background: var(--bg4);
+}
+
+.wiz-btn-start {
+  font-size: var(--text-md);
+  padding: var(--space-md) var(--space-2xl);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: var(--or);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  transition: opacity 0.12s;
+}
+
+.wiz-btn-start:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.wiz-btn-back:disabled,
+.wiz-btn-next:disabled,
+.wiz-btn-start:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

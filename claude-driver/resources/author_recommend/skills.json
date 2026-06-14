@@ -1,0 +1,44 @@
+[
+ {
+  "name": "document-skills",
+  "description": "Official Anthropic comprehensive document processing bundle for Claude Code. It aggregates office automation capabilities across multiple major formats including Word documents (.docx), PDFs, PowerPoint presentations (.pptx), and Excel spreadsheets (.xlsx). Use this skill whenever the user needs to programmatically create, read, parse, extract text/tables, or structurally modify modern office files without breaking original layouts and metadata.",
+  "tags": ["document", "office", "docx", "pdf", "pptx", "xlsx"],
+  "detail": "## Document Skills Bundle\n\nThe ultimate Anthropic reference suite designed to handle advanced file management and office parsing workflows directly from Claude Code.\n\n### Included Components\n- **docx**: Programmatic creation, schema edits, and clean markdown text extraction for Word documents.\n- **pdf**: Layout-aware parsing, secure merging/splitting, and form handling for fixed-layout data.\n- **pptx**: Dynamic presentation engineering, template adjustments, and markdown-to-slide conversions.\n- **xlsx**: Structured spreadsheet processing, complex data grid analysis, and workbook automations.\n\n### Multi-Environment Requirements\nDepends on a mix of lightweight file parsers and systemic rendering utilities to guarantee exact format translation.",
+  "install": {
+    "commands": [
+      "# 1. 在 Claude Code 交互界面中添加 Anthropic 官方开源 Skills 仓库作为源：",
+      "/plugin marketplace add anthropics/skills",
+      "# 2. 一键安装整合了 Word、PDF、PPT 与 Excel 处理能力的官方原生文档技能包：",
+      "/plugin install document-skills",
+      "# 3. 全平台运行依赖补充（请根据当前系统执行对应的终端命令）：",
+      "# Windows 平台依赖补全命令：",
+      "pip install python-docx pypdf reportlab pdf2image python-pptx openpyxl markitdown pandoc",
+      "# macOS 平台依赖补全命令（需通过 Homebrew 安装底层系统级转换组件）：",
+      "brew install pandoc poppler libreoffice && pip3 install python-docx pypdf reportlab pdf2image python-pptx openpyxl markitdown",
+      "# Ubuntu / Linux 平台依赖补全命令：",
+      "sudo apt-get update && sudo apt-get install -y pandoc poppler-utils libreoffice && pip3 install python-docx pypdf reportlab pdf2image python-pptx openpyxl markitdown"
+    ]
+  }
+},
+{
+  "name": "skill-creator",
+  "description": "Official Anthropic meta-tool designed for automated skill engineering. It empowers Claude Code to design, implement, and self-correct new custom agent skills from scratch. Use this skill when you want Claude to build new modular tools, write compliance assertion test-suites, or compile and debug standalone skill manifests (.md or JSON definitions) for your localized development environment.",
+  "tags": ["meta-tool", "developer", "skill-engineering", "automation"],
+  "detail": "## Skill Creator\n\nAnthropic's reference implementation for bootstrapping and refining localized Model Context Protocol and Claude Code extensions.\n\n### Core Strengths\n- **Automated Scaffolding**: Generates compliant skill definitions with proper YAML frontmatter boundaries dynamically.\n- **Self-Correction Feedback Loop**: Automatically executes local test benches, catches environment execution errors, and rewrites flawed code blocks.\n- **Test Assertions Generator**: Builds rigorous evaluation checkpoints to ensure the newly created skill performs robust multi-turn tool calling.",
+  "install": {
+    "commands": [
+      "# 1. 在 Claude Code 交互命令行中通过添加官方技能源进行整体套件获取：",
+      "/plugin marketplace add anthropics/skills",
+      "# 2. 一键安装包含 skill-creator 在内的官方开发者工具大包（目前不支持对单一元工具进行割裂下载）：",
+      "/plugin install example-skills",
+      "# 3. 补全全平台开发所需的语言及构建沙箱依赖：",
+      "# Windows 平台运行环境依赖补全：",
+      "pip install pytest && npm install -g typescript tsx",
+      "# macOS 平台运行环境依赖补全：",
+      "pip3 install pytest && npm install -g typescript tsx",
+      "# Ubuntu/Linux 平台运行环境依赖补全：",
+      "sudo apt-get update && pip3 install pytest && sudo npm install -g typescript tsx"
+    ]
+  }
+}
+]

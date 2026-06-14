@@ -1,0 +1,79 @@
+/*
+ * 代码说明：项目监控左半面板样式
+ */
+
+.lp-container {
+  width: clamp(312px, 30vw, 504px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg1);
+  border-right: 1px solid var(--bd);
+  overflow: hidden;
+  flex-shrink: 0;
+  align-self: stretch;  /* 强制撑满父级 flex row 的交叉轴高度 */
+}
+
+.lp-empty {
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--tx4);
+}
+
+.lp-empty-icon {
+  font-size: 24px;
+  color: var(--bd2);
+}
+
+/* ── Agent Block 列表区（层②） ── */
+.lp-agent-list {
+  flex: 3;
+  overflow-y: auto;
+  padding: var(--space-md) var(--space-lg);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-work-empty {
+  padding: var(--space-lg) 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lp-ph-label {
+  font-size: var(--text-sm);
+  color: var(--tx4);
+}
+
+/* ── 启动 Session 按钮区 ── */
+.lp-start-area {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-lg);
+  flex-shrink: 0;
+}
+
+.lp-btn-start {
+  font-size: var(--text-sm);
+  padding: var(--space-md) var(--space-2xl);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: var(--or);
+  color: #fff;
+  font-weight: 700;
+  transition: opacity 0.12s;
+}
+
+.lp-btn-start:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.lp-btn-start:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
