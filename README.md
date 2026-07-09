@@ -37,6 +37,9 @@ Claude Steer is a cross-platform desktop Harness tool for AI. It is:
 
 > **Why Claude Steer?** When AI Harness is still in its exploratory phase with no established paradigm, I believe you should first find a good tool. Like having 15 boxes to move -- when you don't know the most efficient method, find the right tool first rather than carrying them one by one.
 
+>  Intro video: pain points/needs --> detailed introduction of new concepts and mechanisms:
+>  Live demo 1:
+
 ---
 
 ## Who is this for?
@@ -206,6 +209,7 @@ The architecture of this project has undergone a major refactoring. The author i
 ---
 
 ## FAQ
+>  The current version of Claude Steer may have some bugs, but the software is designed with a fallback mechanism. In any situation, clicking "Open Terminal" at the bottom of each main panel in the history work panel can resolve most potential bugs, because the terminal opened here has all its views and interactions native to Claude Code -- as long as CC itself doesn't have a bug, you can still get back to work normally. Moreover, the various features in Claude Steer are designed to be as decoupled as possible. As long as the bug isn't in the underlying capabilities, after a bug occurs at one point, most other features can still be used normally. As the initial version is a product developed independently by an individual, and the author was near graduation during development with many things running in parallel, it's inevitable that some non-critical bugs in certain details of Claude Steer remain unfixed for now. Please be understanding -- subsequent version updates will gradually resolve them.
 
 ### Claude Steer shows spinning indicator after sending a command with no new output
 
@@ -251,7 +255,7 @@ Later, during an internship with intense real-world vibe coding, I developed a d
 
 As someone who follows AI developments, I also collected excellent open-source projects for vibe coding (especially Claude Code) -- cc-connect, openwolf, Skills, MCP servers, and more -- and gradually integrated them into the software.
 
-Requirements kept growing, and I underestimated how much squeezing four parallel tracks (internship, exams, graduation defense, job hunting) would compress my free time. Random uncontrollable events also consumed development time. The code was finally mostly complete by June 1, 2026, followed by multi-platform distribution, testing, compatibility fixes, and promotion work. The first official version was released on June 15, 2026.
+Requirements kept growing, and I underestimated how much squeezing four parallel tracks (internship, exams, graduation defense, job hunting) would compress my free time. Random uncontrollable events also consumed development time. The code was finally mostly complete by June 1, 2026, followed by multi-platform distribution, testing, compatibility fixes, and promotion work. The first official version was released on July 8, 2026.
 
 Ironically, while this project was meant to be a framework for incorporating my learning and practical insights, the development process itself kept generating new theoretical and practical insights -- making requirements grow partly because of the project's own development. And since I hadn't formed my own paradigm understanding of Harness at the start, the architecture underwent a major refactoring (to support a grander vision and make it more AI-native -- enabling future upgrades within limited context windows using fewer tokens, with non-destructive, convention-following development: an architecture suited for AI's future development, not just human development).
 

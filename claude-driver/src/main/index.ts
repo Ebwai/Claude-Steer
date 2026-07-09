@@ -95,6 +95,31 @@ const termWindows = new Map<string, BrowserWindow>()
 // ── PtyManager 全局实例（跨 session 共享）──────────────────────────────────
 const ptyManager = new PtyManager()
 
+// ── trust folder 对话框自动确认 ──────────────────────────────────────────────
+// 裸启 claude 进入未信任目录时，Claude TUI 会弹 "Do you trust the files in this folder?"
+// 选择框（默认光标聚焦 Yes）。insight/chat 等自动流程无人工干预会被卡住，故在 onData
+// 中统一检测文本并发送回车确认 Yes。配合启动前的 ensureProjectTrusted() 双保险。
+//
+// 关键词尽量宽泛：Claude Code 不同版本/语言下对话框文案可能变化，只要命中任一关键词
+// 即判定为 trust 对话框。trustHandledPtyIds 保证每个 session 只处理一次，
+// 误命中代价仅为多发一个回车（trust 对话框总是启动时最先出现，时序上不会被后续输出抢占）。
+const TRUST_DIALOG_RE = /trust the files|trust these files|trust this folder|trust this directory|trust this project|do you trust|i trust this|trust folder/i
+
+const trustHandledPtyIds = new Set<string>()
+
+/** 检测 trust folder 对话框并自动回车确认 Yes；返回是否处理了本次对话框 */
+function handleTrustFolderPrompt(sessionId: string, data: string): boolean {
+  if (trustHandledPtyIds.has(sessionId)) return false
+  const plain = stripAnsi(data)
+  if (TRUST_DIALOG_RE.test(plain)) {
+    trustHandledPtyIds.add(sessionId)
+    console.log(`[trust] dialog detected in session ${sessionId}, sending Enter to confirm Yes`)
+    ptyManager.rawWrite(sessionId, '\r')
+    return true
+  }
+  return false
+}
+
 // ── insight 临时 PTY 守卫集合 ─────────────────────────────────────────────────
 // insight PTY 的 sessionId 均以 "insight-" 开头；onHookEvent 中用此 Set 快速跳过
 const insightPtyIds = new Set<string>()
@@ -2136,6 +2161,9 @@ function registerIpcHandlers(): void {
     const homeDir = os.homedir()
     const reportPath = path.join(homeDir, '.claude', 'usage-data', 'report.html')
 
+    // 预信任 home 目录，跳过 Claude trust folder 对话框（与正常 session 启动一致）
+    ensureProjectTrusted(homeDir)
+
     console.log(`[insight] starting temporary PTY (id=${insightId}) in ${homeDir}`)
     insightPtyIds.add(insightId)
 
@@ -2148,21 +2176,32 @@ function registerIpcHandlers(): void {
           projectPath: homeDir,
           permissionMode: 'default',
           onData: (_id, data) => {
-            // 检测 Claude 交互提示符（">" 或 "❯" 或 "?" 开头行）
-            if (!promptReady && (data.includes('❯') || data.includes('> ') || data.includes('?') || data.includes('Human:'))) {
+            const plain = stripAnsi(data)
+            console.log(`[insight:DATA] ${JSON.stringify(plain.slice(0, 400))}`)
+            // 优先处理 trust folder 对话框（兜底：应对预信任失败/新机器/并发竞争）
+            // 命中则本次跳过 prompt 检测——trust 对话框选项自带 ❯ 光标，避免在 trust 未确认时
+            // 被下方 promptReady 判定误发 /insights（原 bug 的残留路径）
+            if (handleTrustFolderPrompt(insightId, data)) return
+            // 检测 Claude 交互提示符——去掉宽泛的 '?' 与 '> '，避免误命中 trust 对话框文本
+            //   ❯      : Claude TUI 主提示符
+            //   Human: : 消息输入提示
+            //   \n>    : 行首独立 > 提示符（去 ANSI 后匹配，排除 "a > b" 类普通文本里的 >）
+            if (!promptReady && (plain.includes('❯') || plain.includes('Human:') || /\n>\s/.test(plain))) {
               promptReady = true
               console.log('[insight] Claude prompt detected, sending /insights')
               // 使用 rawWrite 保证不再追加多余 \r
               ptyManager.rawWrite(insightId, '/insights\r')
             }
-            // 检测 /insights 完成信号（"Done" 或报告路径出现在输出中）
-            if (promptReady && (data.includes('report.html') || data.includes('Generated') || data.includes('Done'))) {
+            // 检测 /insights 完成信号（基于去 ANSI 后的纯文本匹配，避免颜色码拆断关键词）
+            if (promptReady && (plain.includes('report.html') || plain.includes('Generated') || plain.includes('Done'))) {
               console.log('[insight] /insights done signal detected in stdout')
               // 延迟 500ms 确保文件写入完成后再检查
               setTimeout(() => {
                 if (fs.existsSync(reportPath)) {
                   console.log(`[insight] report.html confirmed at ${reportPath}`)
                   mainWindow?.webContents.send(IPC.INSIGHT_REPORT_READY, { filePath: reportPath })
+                } else {
+                  console.warn(`[insight] done signal seen but report.html NOT found at ${reportPath}`)
                 }
                 // 销毁临时 PTY
                 ptyManager.stopSession(insightId)
@@ -2172,6 +2211,7 @@ function registerIpcHandlers(): void {
           onExit: (_id, code) => {
             console.log(`[insight] temporary PTY exited (code=${code})`)
             insightPtyIds.delete(insightId)
+            trustHandledPtyIds.delete(insightId)
             // 进程退出时若文件已存在（命令成功但未检测到 Done 信号），补发通知
             if (fs.existsSync(reportPath)) {
               mainWindow?.webContents.send(IPC.INSIGHT_REPORT_READY, { filePath: reportPath })
@@ -2187,12 +2227,14 @@ function registerIpcHandlers(): void {
           console.warn('[insight] 2min timeout, force stopping insight PTY')
           ptyManager.stopSession(insightId)
           insightPtyIds.delete(insightId)
+          trustHandledPtyIds.delete(insightId)
         }
       }, 120_000)
 
       return { ok: true }
     } catch (err) {
       insightPtyIds.delete(insightId)
+      trustHandledPtyIds.delete(insightId)
       console.error('[insight] failed to start insight PTY:', err)
       return { ok: false, error: String(err) }
     }
@@ -2204,6 +2246,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.CHAT_START, async () => {
     const chatId = `chat-${randomUUID()}`
     const homeDir = os.homedir()
+    // 预信任 home 目录，跳过 Claude trust folder 对话框（与正常 session 启动一致）
+    ensureProjectTrusted(homeDir)
     chatPtyIds.add(chatId)
     console.log(`[chat] starting PTY (id=${chatId}) in ${homeDir}`)
 
@@ -2214,12 +2258,14 @@ function registerIpcHandlers(): void {
           projectPath: homeDir,
           permissionMode: 'default',
           onData: (_id, raw) => {
-            // 交互式 PTY：原始输出直接转发到 chat 终端窗口
+            // 优先处理 trust folder 对话框（兜底），其余原始输出转发到 chat 终端窗口
+            handleTrustFolderPrompt(chatId, raw)
             chatWindows.get(chatId)?.webContents.send(IPC.TERM_DATA, raw)
           },
           onExit: (sid, code) => {
             console.log(`[chat] PTY exited (id=${sid} code=${code})`)
             chatPtyIds.delete(sid)
+            trustHandledPtyIds.delete(sid)
             chatWindows.get(sid)?.webContents.send(IPC.TERM_DATA, '\r\n[对话已结束]\r\n')
           },
         },
@@ -2228,6 +2274,7 @@ function registerIpcHandlers(): void {
       return { ok: true, sessionId: chatId }
     } catch (err) {
       chatPtyIds.delete(chatId)
+      trustHandledPtyIds.delete(chatId)
       console.error('[chat] startBare failed:', err)
       return { ok: false, error: String(err) }
     }
