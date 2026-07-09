@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Serena AI tool
+.serena/
+
+# Claude Code local settings
+.claude/
+
+# Environment
+.env
+.env.local
+
+# Build output
+dist/
+out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Notes / Docs / Plans (development artifacts) ──
+/CLAUDE.md
+/PRD.md
+/knowledge/
+/plan/
+/docs/
+/scripts/
+
+# Root-level markdown notes
+/多平台分发和测试.md
+/架构.md
+
+# claude-driver internal notes (not app code)
+claude-driver/plan/
+claude-driver/im.md
+claude-driver/src/Code_Structure.md
+
+# Marketing / promotional materials
+宣传/
+
+# 项目文档（不包含在正式发布中）
+*.md
+!README.md
+!README_CN.md
+!LICENSE
