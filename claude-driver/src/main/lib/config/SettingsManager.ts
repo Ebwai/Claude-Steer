@@ -191,25 +191,57 @@ export function injectHookConfig(port: number): void {
   const settings = readClaudeSettings()
   if (!settings.hooks) settings.hooks = {}
 
+  /**
+   * 判断某个 hook 条目是否为仪表盘注入的 hook（所有平台格式统一识别）
+   * 覆盖：
+   *   - curl 格式（macOS/Linux）：curl ... http://127.0.0.1:PORT/hooks ...
+   *   - PowerShell .ps1 桥接脚本（Windows）：powershell ... hook-bridge.ps1
+   *   - 旧 PowerShell 内联格式：[Console]::In.ReadToEnd / $input | Out-String
+   *   - 旧 http 格式：{ type: 'http', url: 'http://127.0.0.1:PORT/hooks' }
+   *
+   * 跨平台迁移（如从 Mac 切到 Windows）会产生不同格式并存，Claude Code 对所有
+   * matcher 都会执行，导致 hook 事件 × N。此函数统一识别后清理，确保每个事件
+   * 只有当前平台的一条 hook。
+   */
+  function isOwnDashboardHook(h: { type?: string; url?: string; command?: string }): boolean {
+    if (h.type === 'http' && h.url?.includes('127.0.0.1:' + port + '/hooks')) {
+      return true
+    }
+    if (h.type === 'command' && typeof h.command === 'string') {
+      // curl 格式（所有平台可能残留）
+      if (h.command.startsWith('curl ') && h.command.includes('127.0.0.1:' + port + '/hooks')) {
+        return true
+      }
+      // 当前平台 .ps1 桥接脚本
+      if (h.command.includes(HOOK_BRIDGE_SCRIPT)) {
+        return true
+      }
+      // 旧 PowerShell 内联格式
+      if (h.command.includes('[Console]::In.ReadToEnd') ||
+          h.command.includes('$input | Out-String')) {
+        return true
+      }
+    }
+    return false
+  }
+
   let changed = false
   for (const eventType of HOOK_EVENT_TYPES) {
     if (!settings.hooks[eventType]) settings.hooks[eventType] = []
     let matchers = settings.hooks[eventType]
 
-    // 清理旧格式 hook 命令（Windows 迁移）：
-    // - [Console]::In.ReadToEnd 格式（旧版，会挂起 PTY 子进程）
-    // - $input | Out-String 格式（-NoProfile -Command 内联版，stdin 读取不可靠）
+    // 清理所有旧格式仪表盘 hook（跨平台迁移会残留多套格式）
     const cleanedMatchers: SettingsHookMatcher[] = []
     for (const m of matchers) {
       if (m.hooks) {
         const remaining = m.hooks.filter(h => {
-          if (h.type === 'command' && typeof h.command === 'string') {
-            if (h.command.includes('[Console]::In.ReadToEnd') ||
-                h.command.includes('$input | Out-String')) {
-              console.log('[SettingsManager] Removing stale hook (old PowerShell format)')
-              changed = true
-              return false
-            }
+          if (isOwnDashboardHook(h)) {
+            const format = h.type === 'http' ? 'http' :
+              h.command?.startsWith('curl ') ? 'curl' :
+              h.command?.includes(HOOK_BRIDGE_SCRIPT) ? 'ps1' : 'old-ps'
+            console.log(`[SettingsManager] Removing stale dashboard hook (${format}): ${eventType}`)
+            changed = true
+            return false
           }
           return true
         })
@@ -225,6 +257,7 @@ export function injectHookConfig(port: number): void {
     matchers = cleanedMatchers
     settings.hooks[eventType] = matchers
 
+    // 注入当前平台的 hook 命令
     const alreadyInjected = matchers.some(m =>
       m.hooks?.some(h => h.type === 'command' && h.command === hookCommand)
     )
@@ -236,7 +269,7 @@ export function injectHookConfig(port: number): void {
 
   if (changed) {
     writeClaudeSettings(settings)
-    console.log(`[SettingsManager] Hook config injected (command/curl) for port ${port}`)
+    console.log(`[SettingsManager] Hook config injected for port ${port} (platform=${process.platform})`)
   } else {
     console.log(`[SettingsManager] Hook config already present for port ${port}, skipping`)
   }
