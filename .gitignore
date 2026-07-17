@@ -27,6 +27,8 @@ __pycache__/
 *.pyc
 *.pyo
 
+# dev tools
+tools/
 # 保留所有开发资源
 # - knowledge/ ✓ (包含项目知识和文档)
 # - .claude/ ✓ (包含 Claude Code 配置)
@@ -37,3 +39,4 @@ __pycache__/
 claude-driver/plan/
 claude-driver/im.md
 claude-driver/src/Code_Structure.md
+

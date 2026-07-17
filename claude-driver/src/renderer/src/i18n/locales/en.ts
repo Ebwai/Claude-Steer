@@ -346,16 +346,6 @@ const en: Record<string, string> = {
   'settings.tokenCost.monthlyBudget': 'Monthly Budget Alert',
   'settings.tokenCost.perMonth': 'USD / month',
 
-  // ── Settings - API ──
-  'settings.api.hide': 'Hide',
-  'settings.api.show': 'Show',
-  'settings.api.testing': 'Testing…',
-  'settings.api.testConnectivity': 'Test Connectivity',
-  'settings.api.connectivityOk': 'Connectivity OK',
-  'settings.api.keyCommand': 'Key Command',
-  'settings.api.keyCommandHint': '(Optional, dynamically obtain by running a command)',
-  'settings.api.keyCommandPlaceholder': 'e.g. pass anthropic/api-key',
-
   // ── Settings - Memory ──
   'settings.memory.autoMemory': 'Auto Memory',
   'settings.memory.autoMemorySub': 'Claude auto-summarizes and persists session knowledge',

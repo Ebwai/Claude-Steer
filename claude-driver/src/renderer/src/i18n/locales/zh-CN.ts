@@ -346,16 +346,6 @@ const zhCN: Record<string, string> = {
   'settings.tokenCost.monthlyBudget': '月度预算警告阈值',
   'settings.tokenCost.perMonth': 'USD / 月',
 
-  // ── 设置 - API (ApiSection) ──
-  'settings.api.hide': '隐藏',
-  'settings.api.show': '显示',
-  'settings.api.testing': '测试中…',
-  'settings.api.testConnectivity': '测试连通性',
-  'settings.api.connectivityOk': '连通性正常',
-  'settings.api.keyCommand': '获取 Key 的命令',
-  'settings.api.keyCommandHint': '（可选，通过运行命令动态获取）',
-  'settings.api.keyCommandPlaceholder': '例：pass anthropic/api-key',
-
   // ── 设置 - 记忆 (MemorySection) ──
   'settings.memory.autoMemory': '自动记忆',
   'settings.memory.autoMemorySub': 'Claude 自动总结并持久化会话知识点',
