@@ -549,3 +549,35 @@
 - **通用原则**：凡是"从关系 Map 中查找我的邻居"，必须加 `id !== currentId` 排除条件，否则自引用结果会导致 no-op。
 - **来源**：T11 键盘导航调试，2026-04-25 实测验证
 
+---
+
+## [权限机制] Claude Code 权限提示是 TUI 选项型交互，非 y/n 字符输入
+
+- **内容**：Claude Code 权限提示不是简单的"输入 y/n + 回车"的字符输入型，而是 TUI 选项型交互（类似 trust folder 对话框）。终端弹出 3 个选项：
+  ```
+  ❯ 1. Yes
+    2. Yes, and don't ask again for ...commands in ...
+    3. No
+  Esc to cancel · Tab to amend · ctrl+e to explain
+  ```
+- **默认聚焦**：Yes（第 1 项），❯ 光标初始在 "1. Yes" 旁
+- **导航**：方向键上/下切换选项，带 wrap 循环
+- **Tab = amend**：切换到附加文字输入模式，可在选定选项后输入文字（对 Claude 的反馈），回车发送
+- **按键映射**（用 rawWrite 发送 ANSI 转义序列，不自动追加 \r）：
+  - 同意（无附加）：`\r`（直接回车，默认 Yes）
+  - 拒绝（无附加）：`\x1bOB\x1bOB\r`（Down×2 到 No + Enter）
+  - 同意 + 附加：`\t{msg}\r`（Tab + 文字 + Enter）
+  - 拒绝 + 附加：`\x1bOB\x1bOB\t{msg}\r`
+- **关键发现**：
+  1. **按键时间间隔是核心**：一次性发送所有字节（如 `\x1b[B\x1b[B\r` 整体写入）会导致 TUI 来不及逐个处理，所有按键被忽略，结果全部变成"同意"（停留在默认 Yes）。必须逐个按键发送，每次间隔 ~50ms，TUI 才能正确响应。这是原 bug 的根本原因之一（与 y/n 字母问题并列）。
+  2. **转义序列兼容性**：`\x1b[B`（普通模式）和 `\x1bOB`（应用光标模式）在有延时的情况下都能工作。代码使用 `\x1b[B`。
+- **禁止发 y/n 字母**：TUI 是选项型交互，字母键被忽略（原 bug 根因）
+- **真实时序**（实测验证，单实例环境）：
+  1. Claude 欲用工具 -> PreToolUse hook fire
+  2. 无 hook 决策 -> Claude 弹 TUI（立刻渲染）
+  3. ~2s 后 PermissionRequest hook fire -> 驱动 app 审批面板显示
+  4. 面板显示时 TUI 已就绪，用户点同意/拒绝发送按键序列到 PTY stdin
+- **单实例约束**：HookServer 端口 39521 唯一。多实例运行时 hook 路由可能到另一实例，本实例的 PermissionRequest 不触发，审批面板不显示。
+- **调试方法**：PTY onData 中可用 `stripAnsi(data)` + 关键词 `don't ask again` / `❯` + `Yes|No` 检测权限 TUI；用 `rawWrite` 发送按键（不用 `writeToSession`，后者自动追加 `\r` 会破坏转义序列）
+- **来源**：M8 权限响应 bug 修复，2026-07-18 实测验证（`~/.claude-driver/permission-debug.log` 原始 PTY 输出）
+

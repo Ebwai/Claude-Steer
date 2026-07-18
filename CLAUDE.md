@@ -1,32 +1,29 @@
 # CLAUDE_Steer
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## 项目核心需求
 
-实现Claude Code的调度系统
+见\docs\PRD.md和MRD.md
 
 ## 环境
 
 目前开发是在ubuntu系统中，这个软件需要在windows,mac和ubuntu三平台都可用
 
 
-## 项目知识导航
+## 项目重要文档
 
 | 文件 | 位置 | 作用 |
 |------|------|------|
-| overall_plan.md | `plan/` | 母目标/子目标/任务的完整计划（MST结构）|
-| Knowledge_Guide.md | `knowledge/` | 所有参考资料的索引，告诉你从哪里查知识 |
-| Important_Info.md | `knowledge/` | 项目特殊知识（与通识认知不同的关键点）|
-| Code_Structure.md | 各功能模块目录下 | 架构图、流程图、模块代码说明 |
-| 使用指南.md | 对应 M 计划目录下 | 每个母任务完整的运行使用说明 |
+| overall_plan.md | `plan\` | 母目标/子目标/任务的完整计划（MST结构）|
+| codebase-index | `\.claude\skills\codebase-index`| 是可以被调用的skills，整个代码仓库的检索系统，查询代码和了解仓库必调用 |
+| bug-fix | `\.claude\skills\bug-fix` | 是可以被调用的skills，当用户提到修改bug或类似表达，以及你识别出的bug时，必须使用这个skill|
+| feature-add | `\.claude\skills\feature-add` | 是可以被调用的skills，当用户提到增加新功能或类似表达时，必须使用这个skill|
+| 开发指南 |`\.claude\rules\开发指南.md` | 必须遵守的开发流程指引，关于各种情况下开发流程的规范化（比如，develop,feature,fix等等情况下的开发过程）|
+| Important_Info.md | `knowledge\` | 项目特殊知识（与通识认知不同的关键点）|
 
-## 工作流程与规范
+## 规范
 
-- 每次会话的工作流程见 `.claude/rules/workflow.md`（每次会话自动加载）
 - Plan 管理规则见 `.claude/rules/plan-management.md`
-- Important_Info 维护规则见 `.claude/rules/important-info.md`
-- 代码规范见 `.claude/rules/code-standards.md`（编辑源码时自动加载）
+- 搜索不要用web-search，调用any-search skills
 
 ## 在写代码时必须要遵守的点：
 1. 在所有不确定和重要的点中必须添加输出日志到命令行中，方便定位问题

@@ -35,7 +35,7 @@ graph TD
 
 - Hook POST -> hook-server -> HookEventBus -> IPC.HOOK_EVENT/STATUS_LINE
 - JSONL tail -> jsonl -> IPC.JSONL_RECORD*
-- PTY stdin 注入（消息队列 Stop 触发 + 权限审批 y/n）
+- PTY stdin 注入（消息队列 Stop 触发 + 权限审批 TUI 按键序列：rawWrite 方向键/回车/Tab，非 y/n 字母）
 
 ### 状态机
 

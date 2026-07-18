@@ -162,7 +162,7 @@ graph TD
 ### 依赖与联动
 
 - **内部依赖**：atoms/notification + atoms/permission；capabilities/permissionQueue。
-- **通信方式**：IPC.PERMISSION_RESPOND（y/n + 附加 -> PTY stdin）；IPC.OPEN_WEBVIEW（insight 报告）。
+- **通信方式**：IPC.PERMISSION_RESPOND（TUI 按键序列 -> PTY stdin rawWrite；同意=回车，拒绝=Down×2+回车（`\x1b[B`，逐个按键间隔50ms），附加=Tab+文字+回车）；IPC.OPEN_WEBVIEW（insight 报告）。
 - **关键交互场景**：权限请求 FIFO -> 审批 -> 注入；info 消息打开报告。
 
 ### 技术选型

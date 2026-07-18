@@ -1995,14 +1995,26 @@ function registerIpcHandlers(): void {
     payload: { sessionId: string; ptySessionId: string; approved: boolean; message?: string }
   ) => {
     try {
-      // 构造 stdin 响应：y/n + 可选附加信息（\r 是 PTY 标准行尾）
-      const response = payload.approved ? 'y' : 'n'
+      // 权限响应：Claude Code 权限提示为 TUI 选项型（默认聚焦 Yes）
+      // 同意：直接回车；拒绝：方向键下×2 到 No + 回车；附加信息：Tab + 文字 + 回车
+      // 逐个按键发送，每个之间 50ms 延迟（TUI 需要逐个处理按键事件）
+      const keys: string[] = []
+      if (!payload.approved) {
+        keys.push('\x1b[B', '\x1b[B')  // Down×2: Yes -> Yes-don't-ask -> No
+      }
       const withMessage = payload.message?.trim()
-        ? `${response}\n${payload.message.trim()}`
-        : response
-      ptyManager.writeToSession(payload.ptySessionId, withMessage)
+      if (withMessage) {
+        keys.push('\t', withMessage, '\r')  // Tab + 文字 + Enter
+      } else {
+        keys.push('\r')  // 直接 Enter
+      }
+      console.log(`[ipc] permission:respond → session=${payload.ptySessionId} approved=${payload.approved} msg=${!!withMessage} keys=${keys.length} seq=${JSON.stringify(keys)}`)
+      for (let i = 0; i < keys.length; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, 50))
+        ptyManager.rawWrite(payload.ptySessionId, keys[i])
+        console.log(`[ipc]   key[${i}] sent (${keys[i].length} chars)`)
+      }
       NotificationService.decrementBadge()
-      console.log(`[ipc] permission:respond → session ${payload.ptySessionId} approved=${payload.approved}`)
       return { ok: true }
     } catch (err) {
       console.error('[ipc] permission:respond failed:', err)

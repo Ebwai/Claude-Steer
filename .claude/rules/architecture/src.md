@@ -84,6 +84,7 @@ graph TD
 ### 非功能约束
 
 ## renderer
+<!-- parent: src -->
 ### 架构图
 
 ```mermaid
@@ -123,16 +124,6 @@ graph TD
 
 ### 技术选型
 ### 非功能约束
-## atoms
-## business
-## capabilities
-## components
-## features
-## hooks
-## utils
-## styles
-## i18n
-## assets
 
 ## preload
 <!-- parent: src -->

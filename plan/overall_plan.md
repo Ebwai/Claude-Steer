@@ -265,6 +265,49 @@
 
 ---
 
+## M8 - 修复聚合通知推送的权限响应策略（y/n -> TUI 按键）[x]
+
+> **背景**：M4 S2 T5（请求交互框）与 M5 S1 T2（消息通知审批）已标记完成，但权限响应策略错误--
+> 往 PTY stdin 注入 'y'/'n'，而 Claude Code 权限提示实为 TUI 选项型交互（默认聚焦 Yes，方向键切换 + 回车确认，Tab 进入 amend），字母键被忽略，导致同意/拒绝失效。
+> **根因**：设计阶段对 Claude Code 权限交互机制认知错误，误以为是字符输入型（y/n + 回车），实际是 TUI 选项型。错误假设贯穿 PRD/Architecture/TDD/knowledge。
+> **真实机制**（实测验证，日志见 `~/.claude-driver/permission-debug.log`）：
+>   1. Claude 欲用工具 -> PreToolUse hook fire（hook-bridge 转发到 app）
+>   2. 无 hook 决策 -> Claude 弹 TUI：❯ 1. Yes（默认聚焦）/ 2. Yes-and-don't-ask / 3. No；底部 "Esc to cancel · Tab to amend"
+>   3. ~2s 后 PermissionRequest hook fire -> 驱动 app 审批面板显示
+>   4. 用户在面板点同意/拒绝 -> 应发按键序列（非 y/n）
+> **按键映射**（rawWrite 发送，不追加 \r）：同意=`\r`；拒绝=`\x1b[B\x1b[B\r`；同意+附加=`\t{msg}\r`；拒绝+附加=`\x1b[B\x1b[B\t{msg}\r`
+> **交付物**：审批面板同意/拒绝（含附加信息）正确驱动 Claude TUI 完成权限响应；全栈文档纠正 y/n 错误描述；Important_Info 记录真实机制。
+> **验收标准**：触发权限申请 -> 面板弹出 -> 点同意 Claude 继续 / 点拒绝 Claude 取消 / 带附加信息消息送达 Claude；临时调试代码已移除。
+
+### S1 - 修改 PRD 中权限响应的错误描述 [x]
+
+- [x] T1 - PRD §2.2.2（line 437）「底层：...注入 y/n + 附加文字」-> 改为 TUI 按键机制描述
+- [x] T2 - PRD 交互流程（line 770）「用户同意/拒绝（可附加信息）-> 注入 y/n」-> 改为「发 TUI 按键序列」
+
+### S2 - 修改 Architecture 类文档 [x]
+
+- [x] T1 - 修改 `.claude/rules/architecture/src/renderer/features/notifications.md`「IPC.PERMISSION_RESPOND（y/n + 附加 -> PTY stdin）」-> 按键序列
+- [x] T2 - 排查其他 Architecture 文档是否有 y/n 描述并修改（另改 `src/main/lib.md` 的"权限审批 y/n"，block-sync 同步至 features.md/main.md，已验证）
+
+### S3 - 修改 TDD 类文档 [x]
+
+- [x] T1 - 修改 `.claude/rules/tdd/src/renderer/features/notifications.md`「IPC.PERMISSION_RESPOND（y/n + 附加 -> PTY stdin）」-> 按键序列 + 记录实测发现（时序/按键映射/单实例约束）
+- [x] T2 - 排查其他 TDD 文档（`tdd/src/main/lib.md` 的"权限审批 y/n"已改，block-sync 已验证同步）
+
+### S4 - 修改代码 [x]
+
+- [x] T1 - 修改 `claude-driver/src/main/index.ts` PERMISSION_RESPOND handler：'y'/'n' + writeToSession -> 按键序列 + rawWrite
+- [x] T2 - 更新 `claude-driver/knowledge/交互业务层.md` BL-11「writeToSession(ptyId, 'y\r')/'n\r'」-> rawWrite 按键序列
+- [x] T3 - 移除全部临时调试代码（capturePermissionPromptDebug + PERMISSION_DEBUG_FILE + onHookEvent 日志 + 捕获窗口 + hook 事件标记，共 5 处，grep 确认无残留）
+
+### S5 - 验收收尾 [x]
+
+- [x] T1 - 实测三场景：同意 / 拒绝 / 带附加信息（用户确认全部成功，突破点：按键时间间隔 + 应用光标模式 `\x1bOB`/`\x1b[B`）
+- [x] T2 - 同步实测与 Architecture/TDD 文档的差异（Architecture/TDD/交互业务层/Important_Info 均已更新，block-sync 验证通过）
+- [x] T3 - 更新 `knowledge/Important_Info.md` 记录 Claude Code 权限 TUI 真实机制与时序（新增「[权限机制]」条目，含时间间隔关键发现）
+
+---
+
 ## 依赖链总览
 
 ```
