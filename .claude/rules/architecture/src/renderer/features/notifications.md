@@ -13,6 +13,7 @@ graph TD
     NotificationsPage --> Perm["permissionRequestsAtom"]
     NotificationsPage --> Notif["notificationQueueAtom"]
     NotificationsPage -->|IPC.PERMISSION_RESPOND| PTY
+    NotificationsPage -->|IPC.PERMISSION_DISMISS| Badge["角标更新"]
     NotificationsPage -->|IPC.OPEN_WEBVIEW| WebView
 ```
 
@@ -28,8 +29,8 @@ graph TD
 ### 依赖与联动
 
 - **内部依赖**：atoms/notification + atoms/permission；capabilities/permissionQueue。
-- **通信方式**：IPC.PERMISSION_RESPOND（TUI 按键序列 -> PTY stdin rawWrite；同意=回车，拒绝=Down×2+回车（`\x1b[B`，逐个按键间隔50ms），附加=Tab+文字+回车）；IPC.OPEN_WEBVIEW（insight 报告）。
-- **关键交互场景**：权限请求 FIFO -> 审批 -> 注入；info 消息打开报告。
+- **通信方式**：IPC.PERMISSION_RESPOND（TUI 按键序列 -> PTY stdin rawWrite；同意=回车，拒绝=Down×2+回车（`\x1b[B`，逐个按键间隔50ms），附加=Tab+文字+回车）；IPC.PERMISSION_DISMISS（关闭通知，只更新角标，不发送按键）；IPC.OPEN_WEBVIEW（insight 报告）。
+- **关键交互场景**：权限请求 FIFO -> 审批 -> 注入；权限请求 -> 关闭 -> 角标更新；info 消息打开报告。
 
 ### 技术选型
 

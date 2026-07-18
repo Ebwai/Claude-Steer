@@ -76,6 +76,8 @@ export const IPC = {
   PROJECT_SETTINGS_WRITE: 'project-settings:write',
   /** 权限请求审批（y/n + 可选附加信息 → PTY stdin） */
   PERMISSION_RESPOND: 'permission:respond',
+  /** 关闭权限请求（只更新角标，不发送按键） */
+  PERMISSION_DISMISS: 'permission:dismiss',
   /** /branch 关系通知：child session 与 parent session 的关联（Main → Renderer push） */
   SESSION_BRANCH_LINK: 'session:branch-link',
   /** PTY ↔ Claude Code session 绑定（SessionStart 触发，Main → Renderer push）

@@ -379,6 +379,7 @@ const zhCN: Record<string, string> = {
   'notifications.approve': '✓ 同意',
   'notifications.approveWithMsg': '✓ 同意 + 附加信息',
   'notifications.deny': '✗ 拒绝',
+  'notifications.dismiss': '关闭',
   'notifications.sendFailed': '发送失败：{{error}}',
   'notifications.openReport': '📂 打开报告',
   'notifications.read': '✓ 已读',
@@ -694,6 +695,7 @@ const zhCN: Record<string, string> = {
   'projectMonitor.approval.deny': '✗ 拒绝',
   'projectMonitor.approval.approveWithMessage': '✓ 同意 + 附加信息',
   'projectMonitor.approval.permissionRequest': '权限请求',
+  'projectMonitor.approval.dismiss': '关闭',
 
   // ── 项目监控 - 左面板 (LeftPanel) ──
   'projectMonitor.leftPanel.selectProjectHint': '选择项目后显示工作情况',

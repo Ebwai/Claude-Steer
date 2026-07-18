@@ -20,7 +20,7 @@ graph TD
 ### 模块概览
 
 - **职责**：桌面通知 + 跨平台任务栏角标管理。
-- **输入**：main/index.ts 在 PermissionRequest Hook 触发 notify+increment、审批后 decrement。
+- **输入**：main/index.ts 在 PermissionRequest Hook 触发 notify+increment、审批后 decrement、关闭后 decrement。
 - **输出**：桌面通知（electron Notification）、任务栏角标。
 
 ### API 概览
@@ -42,7 +42,8 @@ graph TD
 
 1. PermissionRequest Hook -> notify + incrementBadge
 2. 用户审批 -> decrementBadge
-3. 点击桌面通知 -> IPC.NOTIFICATION_FOCUS_TAB（切通知 tab）
+3. 用户关闭 -> decrementBadge（IPC.PERMISSION_DISMISS）
+4. 点击桌面通知 -> IPC.NOTIFICATION_FOCUS_TAB（切通知 tab）
 
 ### 状态机
 

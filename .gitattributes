@@ -1,0 +1,7 @@
+# 文档、代码统一仓库LF
+*.md text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+# Windows批处理强制本地CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf

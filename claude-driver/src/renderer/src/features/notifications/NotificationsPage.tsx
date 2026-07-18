@@ -21,11 +21,12 @@ interface NotificationListProps {
   requests: PermissionRequest[]
   selectedId: string | null
   onSelect: (id: string) => void
+  onDismiss: (id: string) => void
   /** bare=true 时只渲染条目，不渲染外层 div 和 header（用于嵌入父列表） */
   bare?: boolean
 }
 
-function NotificationList({ requests, selectedId, onSelect, bare }: NotificationListProps): React.JSX.Element {
+function NotificationList({ requests, selectedId, onSelect, onDismiss, bare }: NotificationListProps): React.JSX.Element {
   const { t } = useT()
   // FIFO 顺序（receivedAt 升序），按 agentName 分组
   const groups = useMemo(() => {
@@ -55,6 +56,16 @@ function NotificationList({ requests, selectedId, onSelect, bare }: Notification
             >
               <span className="nfp-item-tool">{req.toolName}</span>
               <span className="nfp-item-desc">{req.description}</span>
+              <button
+                className="nfp-item-dismiss"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDismiss(req.requestId)
+                }}
+                title={t('notifications.dismiss')}
+              >
+                ✕
+              </button>
             </div>
           ))}
         </React.Fragment>
@@ -343,6 +354,18 @@ function NotificationsPage(): React.JSX.Element {
     setSelectedId((prev) => (prev === id ? null : prev))
   }, [setNotifQueue])
 
+  // 关闭权限请求（只更新角标，不发送按键）
+  const handleDismissRequest = useCallback(async (requestId: string) => {
+    try {
+      await window.api.invoke(IPC.PERMISSION_DISMISS, { requestId })
+      dequeueRequest(store, requestId)
+      setSelectedId((prev) => (prev === requestId ? null : prev))
+      console.log(`[Notif] dismissed: ${requestId}, remaining=${requests.length - 1}`)
+    } catch (err) {
+      console.error('[Notif] PERMISSION_DISMISS failed:', err)
+    }
+  }, [store, requests.length])
+
   // 自动选中第一条（列表有内容但无选中时）
   const allIds = useMemo(
     () => [...requests.map((r) => r.requestId), ...infoNotifs.map((n) => n.id)],
@@ -388,6 +411,7 @@ function NotificationsPage(): React.JSX.Element {
               requests={requests}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              onDismiss={handleDismissRequest}
               bare
             />
           </>

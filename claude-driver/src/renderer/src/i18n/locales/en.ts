@@ -379,6 +379,7 @@ const en: Record<string, string> = {
   'notifications.approve': '✓ Approve',
   'notifications.approveWithMsg': '✓ Approve + Message',
   'notifications.deny': '✗ Deny',
+  'notifications.dismiss': 'Dismiss',
   'notifications.sendFailed': 'Send failed: {{error}}',
   'notifications.openReport': '📂 Open Report',
   'notifications.read': '✓ Read',
@@ -694,6 +695,7 @@ const en: Record<string, string> = {
   'projectMonitor.approval.deny': '✗ Deny',
   'projectMonitor.approval.approveWithMessage': '✓ Approve + Message',
   'projectMonitor.approval.permissionRequest': 'Permission Request',
+  'projectMonitor.approval.dismiss': 'Dismiss',
 
   // ── Project Monitor - Left Panel (LeftPanel) ──
   'projectMonitor.leftPanel.selectProjectHint': 'Select a project to view status',

@@ -115,7 +115,7 @@
 - [x] T2 — 进行中项目卡片（绿点 + 项目名 + plan 列表 + 双击跳转 + 动态节点高度计算）
 - [x] T3 — 其他项目折叠卡片 + 待确认项目角标（橙色 ⚠️）
 - [x] T4 — 倒三角执行指示器（PostToolUse plan 文件变动触发 → 5min 无变动销毁 / M任务完成3min销毁）
-- [x] T5 — 左下角浮动按钮组（＋新建项目 / 💬 闲聊弹出 Claude 终端子窗口 / 🧩 Plugins）
+- [x] T5 — 左下角浮动按钮组（＋新建项目 / 💬 闲聊弹出 Claude 终端子窗口 / Plugins）
 
 ### S2 — 右半：配置面板 [x]
 
@@ -167,7 +167,7 @@
 
 - [x] T1 — 进程线骨架（项目启动绿色标记 + 垂直左边框时间轴 + 圆形节点指示器）[CSS 内容层已实现]
 - [x] T2 — 用户输入标记（蓝色小标签）+ Claude 回复节点（左侧响应文本卡片）
-- [x] T3 — 工具/经验双框渲染（每节点右侧：蓝色 Tools 框 + 紫色经验框，某列无调用显示"—"）
+- [x] T3 — 工具/经验双框渲染（每节点右侧：蓝色 Tools 框 + 紫色经验框，某列无调用显示"--"）
   - Bug 修复：JsonlParser 原读取 `obj.content`（错误），实际格式为 `obj.message.content`；修正后工具调用正常渲染
 - [x] T4 — 十类插入元素 A-J（插入线 + badge，详见架构.md 4.2.2；Subagent G 类含 mini 进程线嵌套块；F-type Insight 已实现：JSONL assistant 文本解析 + 左向长线 + 前20字展开badge）
 - [x] T5 — 历史模式 vs 实时增量（打开已有项目：全量读 JSONL 批量渲染；运行中：chokidar tail 逐条追加）
@@ -308,6 +308,54 @@
 
 ---
 
+## M9 — 聚合通知支持点击关闭 [x]
+
+> **背景**：用户希望在项目监控界面和消息通知界面的聚合通知中，每个推送支持点击关闭（dismiss），而不必进行审批操作。
+> **需求**：在权限请求列表的每个条目上添加"关闭"按钮，允许用户关闭单个通知而不进行审批。关闭后通知从列表消失，但 Agent 继续等待（不会收到审批响应）。
+> **交付物**：
+>   1. 新增 `IPC.PERMISSION_DISMISS` 通道
+>   2. 消息通知界面（NotificationsPage）每个权限请求条目添加"关闭"按钮
+>   3. 项目监控界面（RequestApprovalPanel）每个审批卡片添加"关闭"按钮
+>   4. 主进程处理关闭操作，更新角标计数
+>   5. 更新 PRD、Architecture、TDD 文档
+> **验收标准**：
+>   1. 触发权限请求后，在消息通知界面和项目监控界面都能看到"关闭"按钮
+>   2. 点击"关闭"按钮后，该通知从列表消失
+>   3. 角标计数正确更新（-1）
+>   4. Agent 继续等待，不会收到任何审批响应
+>   5. 文档已更新
+
+### S1 — 修改 PRD 文档 [x]
+
+- [x] T1 - 更新概念三：消息通知界面，添加"关闭"功能的描述
+- [x] T2 - 更新机制五：系统通知推送，说明关闭操作也会更新角标
+
+### S2 — 修改 Architecture 类文档 [x]
+
+- [x] T1 - 修改 `.claude/rules/architecture/src/renderer/features/notifications.md`，添加"关闭"操作的描述
+- [x] T2 - 修改 `.claude/rules/architecture/src/main/lib/notification.md`，说明关闭操作也会调用 decrementBadge
+
+### S3 — 修改 TDD 类文档 [x]
+
+- [x] T1 - 修改 `.claude/rules/tdd/src/renderer/features/notifications.md`，添加"关闭"操作的流程
+- [x] T2 - 修改 `.claude/rules/tdd/src/main/lib/notification.md`，说明关闭操作也会调用 decrementBadge
+
+### S4 — 修改代码 [x]
+
+- [x] T1 - 在 `ipc-channels.ts` 中新增 `IPC.PERMISSION_DISMISS` 通道
+- [x] T2 - 在 `main/index.ts` 中添加 `PERMISSION_DISMISS` 的处理逻辑（只更新角标，不发送按键）
+- [x] T3 - 修改 `NotificationsPage.tsx`，在权限请求条目上添加"关闭"按钮，调用 `IPC.PERMISSION_DISMISS`
+- [x] T4 - 修改 `RequestApprovalPanel.tsx`，在审批卡片上添加"关闭"按钮，调用 `IPC.PERMISSION_DISMISS`
+- [x] T5 - 更新 i18n 翻译文件，添加"关闭"按钮的翻译文本
+
+### S5 — 验收收尾 [x]
+
+- [x] T1 - 实测：触发权限请求 -> 点击"关闭" -> 通知消失 -> 角标更新 -> Agent 继续等待
+- [x] T2 - 同步实测与 Architecture/TDD 文档的差异
+- [x] T3 - 更新 `knowledge/Important_Info.md`（如有需要）- 无需更新，关闭操作是简单的 UI 操作，不涉及特殊技术细节
+
+---
+
 ## 依赖链总览
 
 ```
@@ -317,6 +365,7 @@ M1（环境就绪）
               └─▶ M4（项目监控，核心监控功能）
                     ├─▶ M5（通知+设置，辅助功能）
                     └─▶ M6（功能入口，扩展功能）
+                          └─▶ M9（聚合通知关闭功能）
 ```
 
-**M5 和 M6 可在 M4 完成后并行开发**（彼此无依赖）。
+**M5 和 M6 可在 M4 完成后并行开发**（彼此无依赖）。M9 依赖 M5 完成。

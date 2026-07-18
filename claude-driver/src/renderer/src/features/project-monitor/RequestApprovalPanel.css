@@ -168,3 +168,19 @@
 .rap-btn--deny:hover:not(:disabled) {
   background: rgba(217, 112, 74, 0.22);
 }
+
+/* ── 关闭按钮 ── */
+.rap-dismiss {
+  background: none;
+  border: none;
+  color: var(--tx3);
+  cursor: pointer;
+  padding: var(--space-xs);
+  font-size: var(--text-xs);
+  margin-left: auto;
+  transition: color 0.15s;
+}
+
+.rap-dismiss:hover:not(:disabled) {
+  color: var(--rd);
+}

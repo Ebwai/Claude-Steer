@@ -29,8 +29,8 @@ graph TD
 ### 依赖与联动
 
 - **内部依赖**：electron（app/nativeImage）；shared/events（IPC）。
-- **通信方式**：由 index.ts 在 PermissionRequest Hook 触发 notify+increment、审批后 decrement；IPC.NOTIFICATION/NOTIFICATION_FOCUS_TAB 推送。
-- **关键交互场景**：权限请求 -> 桌面通知 + 角标 +1；审批 -> 角标 -1；点击通知 -> 切换通知 tab。
+- **通信方式**：由 index.ts 在 PermissionRequest Hook 触发 notify+increment、审批后 decrement、关闭后 decrement；IPC.NOTIFICATION/NOTIFICATION_FOCUS_TAB 推送。
+- **关键交互场景**：权限请求 -> 桌面通知 + 角标 +1；审批 -> 角标 -1；关闭 -> 角标 -1；点击通知 -> 切换通知 tab。
 
 ### 技术选型
 

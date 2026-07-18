@@ -2022,6 +2022,22 @@ function registerIpcHandlers(): void {
     }
   })
 
+  // ── 权限请求关闭（M9）─────────────────────────────────────────────────
+
+  ipcMain.handle(IPC.PERMISSION_DISMISS, async (
+    _event,
+    payload: { requestId: string }
+  ) => {
+    try {
+      console.log(`[ipc] permission:dismiss → requestId=${payload.requestId}`)
+      NotificationService.decrementBadge()
+      return { ok: true }
+    } catch (err) {
+      console.error('[ipc] permission:dismiss failed:', err)
+      return { ok: false, error: String(err) }
+    }
+  })
+
   // ── 独立终端窗口（xterm.js BrowserWindow）────────────────────────────────
 
   ipcMain.handle(IPC.TERM_WINDOW_OPEN, async (

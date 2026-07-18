@@ -67,6 +67,7 @@
 
 /* ── 单条请求项 ── */
 .nfp-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
@@ -98,6 +99,30 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 190px;
+}
+
+/* ── 关闭按钮 ── */
+.nfp-item-dismiss {
+  position: absolute;
+  right: var(--space-sm);
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--tx3);
+  cursor: pointer;
+  padding: var(--space-xs);
+  font-size: var(--text-xs);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.nfp-item:hover .nfp-item-dismiss {
+  opacity: 1;
+}
+
+.nfp-item-dismiss:hover {
+  color: var(--rd);
 }
 
 /* ── 空状态 ── */

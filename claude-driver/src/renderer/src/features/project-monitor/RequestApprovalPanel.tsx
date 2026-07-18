@@ -66,6 +66,16 @@ function ApprovalCard({ req, onDone }: ApprovalCardProps): React.JSX.Element {
     void handleDecide(approved)
   }, [handleDecide])
 
+  const handleDismiss = useCallback(async () => {
+    try {
+      await window.api.invoke(IPC.PERMISSION_DISMISS, { requestId: req.requestId })
+      onDone(req.requestId)
+      console.log(`[ApprovalCard] dismissed: ${req.requestId}`)
+    } catch (err) {
+      console.error('[ApprovalCard] PERMISSION_DISMISS failed:', err)
+    }
+  }, [req.requestId, onDone])
+
   return (
     <div className="rap-card">
       {/* 来源 + 操作描述 */}
@@ -73,6 +83,14 @@ function ApprovalCard({ req, onDone }: ApprovalCardProps): React.JSX.Element {
         <span className="rap-agent">{req.agentName}</span>
         <span className="rap-separator">{t('projectMonitor.approval.requestExecute')}</span>
         <span className="rap-tool">{req.toolName}</span>
+        <button
+          className="rap-dismiss"
+          onClick={handleDismiss}
+          disabled={!!pending}
+          title={t('projectMonitor.approval.dismiss')}
+        >
+          ✕
+        </button>
       </div>
       <div className="rap-desc">{req.description}</div>
 
