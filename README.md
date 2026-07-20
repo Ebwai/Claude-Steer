@@ -37,8 +37,21 @@ Claude Steer is a cross-platform desktop Harness tool for AI. It is:
 
 > **Why Claude Steer?** When AI Harness is still in its exploratory phase with no established paradigm, I believe you should first find a good tool. Like having 15 boxes to move -- when you don't know the most efficient method, find the right tool first rather than carrying them one by one.
 
->  Intro video: pain points/needs --> detailed introduction of new concepts and mechanisms:
->  Live demo 1:
+### Videos
+
+- [Introduction: pain points, concepts, and mechanisms](https://www.bilibili.com/video/BV1MmMG6ME4J)
+- [Live demo](https://www.bilibili.com/video/BV16uTR6gEof)
+
+---
+
+## What's new in v1.1.0?
+
+| Highlight | What changed |
+|:----------|:-------------|
+| 🔔 **Independent notification center** | Permission requests now live in a separate always-on-top window, so minimizing the main window does not hide important approvals. |
+| 🗂️ **Project-grouped requests** | Active requests are grouped by running project, with compact actions and expandable tool-call details. |
+| 🧹 **More monitoring space** | Removing the embedded notification panel gives the real-time workspace more vertical room for agents and context. |
+| ⚙️ **Flexible notification behavior** | Configure always-on-top and automatic opening; closing the window hides it to the tray without losing pending requests. |
 
 ---
 
@@ -46,13 +59,13 @@ Claude Steer is a cross-platform desktop Harness tool for AI. It is:
 
 If you use Claude Code (or plan to) and identify with any of the following, Claude Steer is for you:
 
-**Workflow & Visibility**
+### 👀 Workflow & Visibility
 
 - Full visualization of Claude Code workflows
 - Understand how agents solve problems
 - Learn from AI's problem-solving approach (trained on the collective wisdom of humanity)
 
-**Multi-Project & Multi-Agent**
+### 🧭 Multi-Project & Multi-Agent
 
 - Multi-project portfolio management
 - Single-project deep management
@@ -60,7 +73,7 @@ If you use Claude Code (or plan to) and identify with any of the following, Clau
 - Multi-session chaos management
 - Unified notifications that protect your focus
 
-**Planning, Reliability & Efficiency**
+### 🛡️ Planning, Reliability & Efficiency
 
 - Three-level plan structure to keep agents on track
 - Hallucination detection and verification
@@ -68,25 +81,25 @@ If you use Claude Code (or plan to) and identify with any of the following, Clau
 - Version rollback for safety
 - One-click Git, one-click remote sync
 
-**Cost & Configuration**
+### 📊 Cost & Configuration
 
 - Token usage and cost tracking across providers
 - Seamless multi-provider switching
 - Intuitive Claude Code configuration management
 
-**Stay Current**
+### 🚀 Stay Current
 
 - The framework is ready -- quickly discover and adopt new agent features and capabilities (whether from Claude Code updates or a Skill you want to try in your project right away)
 - Curated high-quality AI development open-source projects (cc-connect, openwolf, Skills, MCP servers, and more) with continuous updates
 - One-click software updates, no manual uninstall/reinstall needed
 
-**Review & Reflection**
+### 🧠 Review & Reflection
 
 - When using Claude Code in fragments during work, it's hard to manually organize interactions into systematic summaries. Claude Steer helps you review, learn from experience, and improve efficiency
 - Multi-level classification and visualization make it easy to revisit and review historical interactions on your own
 - If AI makes a mistake, trace back to exactly where and how it went wrong
 
-**Remote**
+### 🌐 Remote
 
 - Remote control of Claude Code sessions (powered by [cc-connect](https://github.com/nicepkg/cc-connect))
 

@@ -11,8 +11,11 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# Serena AI tool
-.serena/
+# Hidden tool/config directories are development-only in the public release.
+# Keep .github because Actions workflows are required to build installers.
+**/.[!.]*/
+!/.github/
+!/.github/**
 
 # Environment
 .env
@@ -27,16 +30,26 @@ __pycache__/
 *.pyc
 *.pyo
 
-# dev tools
+# Development tools
 tools/
-# 保留所有开发资源
-# - knowledge/ ✓ (包含项目知识和文档)
-# - .claude/ ✓ (包含 Claude Code 配置)
-# - 各种文档 ✓ (PRD、架构、计划等)
-# - 宣传材料 ✓
 
-# claude-driver internal notes (保留，用于开发)
+# Internal documents and plans are excluded from the public release.
+# README files remain visible at every level.
+/*.md
+!/README.md
+!/README_*.md
+/**/*.md
+!/**/README.md
+!/**/README_*.md
+/docs/
+/knowledge/
+/plan/
+/AGENTS.md
+/CLAUDE.md
+
+# claude-driver internal notes
 claude-driver/plan/
+claude-driver/knowledge/
 claude-driver/im.md
 claude-driver/src/Code_Structure.md
 
