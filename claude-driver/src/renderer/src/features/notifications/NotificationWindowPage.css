@@ -1,0 +1,204 @@
+/* 独立通知窗口样式 —— 暗色主题，复用 app CSS 变量 */
+
+.nw-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--bg1, #1a1a1e);
+  color: var(--tx2, #e0e0e0);
+  font-family: inherit;
+  padding: 0;
+}
+
+/* ── 空状态 ── */
+.nw-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 8px;
+  color: var(--tx3, #888);
+}
+.nw-empty-icon {
+  font-size: 24px;
+  color: var(--gr, #35C98A);
+}
+
+/* ── 项目分割区 ── */
+.nw-project-section {
+  border-bottom: 1px solid var(--bd2, #333);
+}
+.nw-project-section:last-child {
+  border-bottom: none;
+}
+
+.nw-project-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg2, #222226);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tx2, #e0e0e0);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.nw-project-name {
+  flex: 1;
+}
+.nw-project-badge {
+  background: var(--or, #e6430d);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 16px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.nw-project-empty {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--tx4, #666);
+}
+
+.nw-project-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 单条通知项 ── */
+.nw-item {
+  border-left: 3px solid var(--or, #e6430d);
+  padding: 6px 12px 6px 9px;
+  border-bottom: 1px solid var(--bg3, #2a2a2e);
+}
+.nw-item:last-child {
+  border-bottom: none;
+}
+
+/* Line 1 */
+.nw-item-line1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.nw-item-agent {
+  font-weight: 700;
+  color: var(--or, #e6430d);
+  white-space: nowrap;
+}
+.nw-item-tool {
+  font-weight: 600;
+  font-family: monospace;
+  font-size: 11px;
+  background: var(--bg3, #2a2a2e);
+  padding: 0 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.nw-item-expand {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 2px;
+}
+.nw-item-dismiss {
+  background: none;
+  border: none;
+  color: var(--tx3, #888);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+  margin-left: auto;
+}
+.nw-item-dismiss:hover:not(:disabled) {
+  color: var(--rd, #ff4444);
+}
+
+/* 展开详情 */
+.nw-item-detail {
+  margin: 4px 0 4px 0;
+  padding: 4px 8px;
+  background: var(--bg3, #2a2a2e);
+  border-radius: 4px;
+  font-size: 10px;
+}
+.nw-item-json {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--tx3, #888);
+  font-family: monospace;
+  font-size: 10px;
+}
+.nw-item-desc {
+  margin-top: 4px;
+  color: var(--tx4, #666);
+  font-size: 10px;
+}
+
+/* Line 2 */
+.nw-item-line2 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.nw-btn {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.1s;
+}
+.nw-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.nw-btn--approve {
+  background: rgba(53, 201, 138, 0.15);
+  color: #35C98A;
+  border: 1px solid rgba(53, 201, 138, 0.35);
+}
+.nw-btn--approve:hover:not(:disabled) {
+  background: rgba(53, 201, 138, 0.25);
+}
+.nw-btn--approve-msg {
+  background: rgba(53, 201, 138, 0.08);
+  color: #35C98A;
+  border: 1px solid rgba(53, 201, 138, 0.2);
+}
+.nw-btn--deny {
+  background: var(--ord, rgba(230, 67, 13, 0.1));
+  color: var(--or, #e6430d);
+  border: 1px solid var(--ord, rgba(230, 67, 13, 0.3));
+}
+.nw-btn--deny:hover:not(:disabled) {
+  background: rgba(230, 67, 13, 0.2);
+}
+
+.nw-input {
+  flex: 1;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--bd2, #444);
+  background: var(--bg1, #1a1a1e);
+  color: var(--tx2, #e0e0e0);
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+.nw-input:focus {
+  border-color: var(--or, #e6430d);
+}

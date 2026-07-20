@@ -24,7 +24,7 @@ graph TD
 
 - **global-monitor**：全局监控页（项目画板 + 右半面板 + 创建向导 + 初始化 SOP）。含 `nodes/`。
 - **project-monitor**：项目监控页（实时工作区 + 历史工作区 + Plan + Git）。含 `canvas/`。
-- **notifications**：消息通知页（权限请求审批 + info 消息）。
+- **notifications**：独立通知窗口（`#/notifications`，独立 BrowserWindow pop-out）。按运行中项目分割 + 2 行通知项 + 可展开详情（复用历史面板触发线可视化）。
 - **settings**：全局设置 Modal（10 section）。含 `sections/`。
 - **chat**：闲聊气泡 pop-out（`#/chat`）。
 - **terminal**：独立终端 pop-out（`#/terminal`，xterm.js）。
@@ -144,27 +144,52 @@ graph TD
 
 ```mermaid
 graph TD
-    NotificationsPage --> Perm["permissionRequestsAtom"]
-    NotificationsPage --> Notif["notificationQueueAtom"]
-    NotificationsPage -->|IPC.PERMISSION_RESPOND| PTY
-    NotificationsPage -->|IPC.PERMISSION_DISMISS| Badge["角标更新"]
-    NotificationsPage -->|IPC.OPEN_WEBVIEW| WebView
+    NW["NotificationWindowPage"] --> Store["自建 Jotai vanilla store"]
+    Store --> PH["createPermissionHandler"]
+    Store --> BH["createPtyBindHandler"]
+    Store --> SL["createSessionLifecycle"]
+    Store --> PL["projects 加载"]
+    NW --> SST["shared/types SessionStatus"]
+    NW --> PSS["ProjectSplitSection"]
+    PSS --> RP["runningProjectsAtom"]
+    PSS --> NI["NotificationItem"]
+    NI -->|展开| TDR["renderToolDetail (共享 utility)"]
+    NI -->|IPC.PERMISSION_RESPOND| PTY
+    NI -->|IPC.PERMISSION_DISMISS| Badge["角标更新"]
+    PH -.IPC.HOOK_EVENT.-> Hook["主进程 HookEventBus 广播"]
+    BH -.IPC.PTY_BIND/UNBIND.-> Hook
+    SL -.IPC.SESSION_STATUS.-> Hook
 ```
 
 ### 定位与职责
 
-- **职责**：消息通知页。左侧权限请求列表（按 Agent 分组 + info 消息）+ 右侧详情（同意/同意带消息/不同意 + info 打开报告）。映射 PRD「消息通知界面」。
-- **边界**：通知 UI；不负责桌面通知（main notification）。
+- **职责**：独立系统级通知窗口（`#/notifications`，独立 BrowserWindow，不设 parent，alwaysOnTop 可配置）。按"正在运行的项目"纵向分割展示权限请求 + insight 报告通知，每条 2 行紧凑布局 + 可展开详情（复用历史面板触发线可视化：工具类橙 / 经验类棕）。映射 PRD「概念三：消息通知界面（独立通知窗口）」。
+- **边界**：通知窗口 UI + 自建 Jotai store + handler 工厂子集；不负责桌面通知（main notification）、不负责主窗口 tab（已移除）。
 
 ### 内部组成
 
-- **NotificationsPage.tsx**：读 permissionRequestsAtom/notificationQueueAtom；local selectedId；内部 NotificationList/NotificationDetail/InfoItem/InfoDetail。调 dequeueRequest capability。
+- **NotificationWindowPage.tsx**：窗口页根。自建 JotaiProvider + vanilla store，注册 handler 工厂子集（createPermissionHandler + createPtyBindHandler + createSessionLifecycle + projects 加载）。订阅 IPC.HOOK_EVENT/PTY_BIND/PTY_UNBIND/SESSION_STATUS/PROJECT_LIST/INSIGHT_REPORT_READY。
+- **ProjectSplitSection.tsx**：项目分割区组件。读 `runningProjectsAtom`（派生 atom），纵向排列每个运行中项目的分割区（项目名头 + 独立滚动通知列表）。项目停止运行时分割区及其通知全部移除。
+- **NotificationItem.tsx**：单条通知项（2 行布局）。Line 1：Agent 框名称（`req.agentName`，主线程/Agent(xxxxxx)）+ 调用名称 + 展开按钮 + 关闭按钮。Line 2：4 交互 Yes/No（同意/同意+消息/拒绝/拒绝+消息，逻辑同原 RequestApprovalPanel：消息随输入框发送，底层 TUI 按键序列）。点击展开显示 `renderToolDetail` 工具调用详情。
+- **toolDetailRender.tsx**（共享 utility）：从 LineInsertionItem 抽取 `renderToolDetail` + `buildToolCompact` + `hasToolDetail`，供 LineInsertionItem 和 NotificationItem 共用（DRY）。
 
 ### 依赖与联动
 
-- **内部依赖**：atoms/notification + atoms/permission；capabilities/permissionQueue。
-- **通信方式**：IPC.PERMISSION_RESPOND（TUI 按键序列 -> PTY stdin rawWrite；同意=回车，拒绝=Down×2+回车（`\x1b[B`，逐个按键间隔50ms），附加=Tab+文字+回车）；IPC.PERMISSION_DISMISS（关闭通知，只更新角标，不发送按键）；IPC.OPEN_WEBVIEW（insight 报告）。
-- **关键交互场景**：权限请求 FIFO -> 审批 -> 注入；权限请求 -> 关闭 -> 角标更新；info 消息打开报告。
+- **内部依赖**：atoms（permission/session-core/projects/pty-binding/runningProjects）；business/handler 工厂（permissionHandler/ptyBindHandler/sessionLifecycle）；shared/toolDetailRender；shared/events（IPC）；shared/types（SessionStatus，作为主窗口与通知窗口唯一的会话状态类型来源）。
+- **通信方式**：
+  - 主进程 HookEventBus 广播 IPC.HOOK_EVENT/PTY_BIND/PTY_UNBIND/SESSION_STATUS 到 mainWindow + 通知窗口（两个 renderer 各自 handler 处理，独立 store）；SESSION_STATUS 的状态字段统一受 shared `SessionStatus` 约束，不在通知窗口重复定义宽泛状态类型
+  - IPC.PROJECT_LIST 由通知窗口 invoke 获取项目列表
+  - IPC.INSIGHT_REPORT_READY 由主进程 `sendToRenderers` 广播到通知窗口（insight PTY 完成时触发，通知窗口自动创建 + 1s 延迟等待页面加载）
+  - IPC.PERMISSION_RESPOND（TUI 按键序列 -> PTY stdin rawWrite；同意=回车，拒绝=Down×2+回车，附加=Tab+文字+回车）
+  - IPC.PERMISSION_DISMISS（关闭通知，只更新角标，不发送按键）
+- **关键交互场景**：
+  - 权限请求 -> 主进程广播 IPC.HOOK_EVENT -> 通知窗口 permissionHandler 处理 -> permissionRequestsAtom 更新 -> ProjectSplitSection 渲染对应项目分割区
+  - 项目 session 启动/停止 -> ptyBindHandler + sessionLifecycle 更新 activeSessionsAtom + ptySessionIdsAtom -> runningProjectsAtom 派生更新 -> 分割区增减
+  - **PTY 退出清理**（关键）：通知窗口有独立 Jotai store，PTY 退出时需完整清理链路——主进程 `onExit` → `sendToRenderers(SESSION_STATUS, {status:'Completed'})` + `sendToRenderers(PTY_UNBIND, {ptyId, claudeId})` → 渲染进程 `handleUnbind` → `unbindPty` + `removeFromRealtime` → `ptySessionIdsAtom` 清理 → `runningProjectsAtom` 重新计算 → 项目分组消失。**不能依赖 `SessionEnd` Hook**（PTY 退出时不一定触发）；**不能用 `unbindPtyFromClaudeSession(sid)`**（迁移后 `claudeToPtyMap` key 为真实 claudeId，lookup 失败 early return）。`removeFromRealtime` 是 `ptySessionIdsAtom` 的唯一写入口之一，必须与 `addToRealtime`（PTY_BIND 时）配对调用。
+  - **Insight 报告通知**：主进程 insight PTY 完成 → `openNotificationWindow()` 自动创建（幂等）→ 1s 延迟 → `sendToRenderers(INSIGHT_REPORT_READY)` → 通知窗口监听 → `insightNotifs` 本地 state 更新（按 `filePath` 去重）→ "系统通知" 分割区渲染 → 用户点击"查看报告" → `shell.openExternal(reportPath)`
+  - 展开详情 -> NotificationItem 读 `req.toolInput` -> 转为 badgeContent -> `renderToolDetail` 渲染（复用历史面板触发线可视化）
+  - 关闭通知 -> IPC.PERMISSION_DISMISS -> 主进程 decrementBadge
+  - 窗口关闭按钮 -> 隐藏到托盘（窗口存活）；新通知来时恢复显示+抢焦点
 
 ### 技术选型
 ### 非功能约束
@@ -182,7 +207,7 @@ graph TD
     LeftPanel --> AgentBlock
     LeftPanel --> PlanSection
     LeftPanel --> ContextPanel
-    LeftPanel --> RequestApprovalPanel
+    LeftPanel --> StatusBar
 ```
 
 ### 定位与职责
@@ -193,7 +218,7 @@ graph TD
 ### 内部组成
 
 - **ProjectMonitorPage.tsx**：页根（读 activeProjectIdAtom）。
-- **LeftPanel.tsx**：左半编排（PlanSection + AgentBlock 列表 + RequestApprovalPanel + ContextPanel + StatusBar + 启动按钮）。
+- **LeftPanel.tsx**：左半编排（PlanSection + AgentBlock 列表 + ContextPanel + StatusBar + 启动按钮）。AgentBlock 列表是上下文面板上方唯一的弹性高度区域，其底边直接衔接 ContextPanel 顶部分隔线。注意：原 RequestApprovalPanel 已迁移至独立通知窗口（见 notifications.md），本页不再包含审批面板或为其预留空间。
 - **AgentBlock.tsx**：单会话实时工作卡（状态 + 工具/经验并排 + Subagent + Insight + MessageInputBar）。
 - **ProcessTimeline.tsx**：垂直时间线（user_input 气泡 + assistant 卡 + 插入线 + Subagent mini + git 操作）。
 - **PlanSection.tsx**：折叠 Plan 树（M/S/T）。
@@ -204,8 +229,8 @@ graph TD
 ### 依赖与联动
 
 - **内部依赖**：atoms（projects/sessions/agent-block/timeline/context-panel/permission/viewport）；canvas/；capabilities（gitCapability/branchRegistry）；hooks。
-- **通信方式**：IPC.SESSION_START/INPUT/STOP/RESUME/JSONL_WATCH/GIT_*/PERMISSION_RESPOND/PROJECT_SETTINGS_*/MCP_SET_ENABLED/SKILL_SET_ENABLED/AGENT_LIST_PROJECT。
-- **关键交互场景**：实时工作区 Agent Block；历史时间线节点 Git 操作；Plan 折叠区。
+- **通信方式**：IPC.SESSION_START/INPUT/STOP/RESUME/JSONL_WATCH/GIT_*/PROJECT_SETTINGS_*/MCP_SET_ENABLED/SKILL_SET_ENABLED/AGENT_LIST_PROJECT。
+- **关键交互场景**：实时工作区 Agent Block 自适应占满 ContextPanel 上方剩余高度；历史时间线节点 Git 操作；Plan 折叠区。
 
 ### 技术选型
 ### 非功能约束

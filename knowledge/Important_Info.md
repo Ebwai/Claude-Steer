@@ -204,6 +204,16 @@
 
 ---
 
+## [布局] 移除条件面板时必须同时回收其弹性占位
+
+- **内容**：`LeftPanel` 是 column flex 布局；聚合通知审批框迁移到独立窗口后，若只移除 `RequestApprovalPanel`、仍保留其相邻的 `<div style={{ flex: 1, minHeight: 0 }} />`，该空节点会继续分走剩余高度，导致 Agent 实时列表的可视框提前结束。
+- **正确约束**：`.lp-agent-list` 是 `ContextPanel` 上方唯一的弹性区域，使用 `flex: 1; min-height: 0; overflow-y: auto`；列表后直接渲染 `ContextPanel`，两者边界重合。
+- **通用原则**：迁移或删除 column flex 中的条件面板时，必须一并审计为它服务的 spacer、margin、固定高度和 `flex` 权重，不能只删除组件节点。
+- **实现位置**：`src/renderer/src/features/project-monitor/LeftPanel.tsx`、`LeftPanel.css`
+- **来源**：M11 实时工作区纵向空间回收，2026-07-20
+
+---
+
 ## [进程线] SubagentBlock 与 Agent badge 配对：用 tool_use_id 精确匹配
 
 - **内容**：`PreToolUse` 和对应的 `PostToolUse` Hook 事件携带**相同的 `tool_use_id`**。"分配任务"插入线应存储此 ID，"返回任务结果"插入线通过相同 ID 精确查找对应的分配线，从而复用 `Agent{n}:type` 标签和 `customWidth`。

@@ -5,6 +5,7 @@
 
 import type { FC } from 'react'
 import { useT } from '../../i18n'
+import { IPC } from '@shared/events/ipc-channels'
 import './TitleBar.css'
 
 interface TitleBarProps {
@@ -42,6 +43,15 @@ const TitleBar: FC<TitleBarProps> = ({ runningCount, todayTokens, todayCostUsd }
 
       {/* 弹性空白 */}
       <div className="titlebar-spacer" />
+
+      {/* 打开独立通知窗口按钮 */}
+      <button
+        className="titlebar-notif-btn"
+        onClick={() => void window.api.invoke(IPC.NOTIFICATION_WINDOW_OPEN)}
+        title={t('titlebar.openNotifications')}
+      >
+        🔔
+      </button>
 
       {/* 右侧元信息 */}
       <div className="titlebar-meta">

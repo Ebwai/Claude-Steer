@@ -43,7 +43,8 @@ graph TD
 1. PermissionRequest Hook -> notify + incrementBadge
 2. 用户审批 -> decrementBadge
 3. 用户关闭 -> decrementBadge（IPC.PERMISSION_DISMISS）
-4. 点击桌面通知 -> IPC.NOTIFICATION_FOCUS_TAB（切通知 tab）
+4. 点击桌面通知 -> 聚焦独立通知窗口
+5. 权限请求 -> 自动打开独立通知窗口（可配置 `notifWindowAutoOpen` 默认开，若已隐藏则恢复+抢焦点）
 
 ### 状态机
 

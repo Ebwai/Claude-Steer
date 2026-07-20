@@ -7,6 +7,8 @@
 import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
 import type { Project, PlanNode, PlanIndicator, Milestone } from '@shared/types/index'
+import { activeSessionsAtom, ptySessionIdsAtom } from './session-core.atom'
+import { pathMatches } from '../utils/pathUtils'
 
 /** 所有项目的 Map（projectId → Project） */
 export const projectsAtom = atom<Map<string, Project>>(new Map())
@@ -118,3 +120,37 @@ export const planIndicatorsByProjectAtom = atomFamily((_projectId: string) =>
 export const milestonesByProjectAtom = atomFamily((_projectId: string) =>
   atom<Milestone[]>([])
 )
+
+/**
+ * 运行中项目列表（派生 atom）
+ * 复用 LeftPanel projectSessions 逻辑：ptySessionIds.has + Running/Paused + pathMatches
+ * 返回 { projectId, name, sessionCount }[]，供通知窗口 ProjectSplitSection 使用
+ */
+export interface RunningProject {
+  projectId: string
+  name: string
+  sessionCount: number
+}
+
+export const runningProjectsAtom = atom<RunningProject[]>((get) => {
+  const sessions = get(activeSessionsAtom)
+  const ptySessionIds = get(ptySessionIdsAtom)
+  const projects = get(projectsAtom)
+
+  const projectSessionCounts = new Map<string, number>()
+  for (const session of sessions.values()) {
+    if (!ptySessionIds.has(session.claudeId ?? session.id)) continue
+    if (session.status !== 'Running' && session.status !== 'Paused') continue
+    for (const project of projects.values()) {
+      if (pathMatches(session.cwd, project.path)) {
+        projectSessionCounts.set(project.id, (projectSessionCounts.get(project.id) ?? 0) + 1)
+        break
+      }
+    }
+  }
+
+  return Array.from(projectSessionCounts.entries()).map(([projectId, count]) => {
+    const project = projects.get(projectId)
+    return { projectId, name: project?.name ?? projectId, sessionCount: count }
+  })
+})

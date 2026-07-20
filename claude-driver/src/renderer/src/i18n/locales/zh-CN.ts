@@ -7,6 +7,7 @@ const zhCN: Record<string, string> = {
   'titlebar.today': '今日',
   'titlebar.cost': '费用',
   'titlebar.running': '运行中',
+  'titlebar.openNotifications': '打开通知窗口',
 
   // ── 底栏 (BottomBar) ──
   'bottombar.globalMonitor': '全局监控',
@@ -362,6 +363,10 @@ const zhCN: Record<string, string> = {
   // ── 设置 - 通知分区 (NotificationSection) ──
   'settings.notificationSection.desktop': '桌面通知',
   'settings.notificationSection.desktopSub': 'Agent 发起权限请求时弹出系统通知',
+  'settings.notificationSection.alwaysOnTop': '通知窗口始终置顶',
+  'settings.notificationSection.alwaysOnTopSub': '独立通知窗口始终显示在其他窗口上方',
+  'settings.notificationSection.autoOpen': '权限请求时自动打开通知窗口',
+  'settings.notificationSection.autoOpenSub': '收到权限请求时自动弹出通知窗口（即使已关闭）',
 
   // ── 通知 (NotificationsPage) ──
   'notifications.title': '消息通知',
@@ -371,6 +376,8 @@ const zhCN: Record<string, string> = {
   'notifications.resolved': '已处理',
   'notifications.pendingRequests': '待处理请求',
   'notifications.systemMessages': '系统消息',
+  'notifications.noRequests': '暂无待处理请求',
+  'notifications.otherRequests': '其他请求',
   'notifications.selectHint': '← 从左侧选择请求',
   'notifications.requestExecution': '请求执行：',
   'notifications.viewParams': '查看参数详情',

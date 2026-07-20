@@ -40,8 +40,11 @@ graph TD
 
 - **Session 启动**：SESSION_START -> PtyManager.startSession(spawn claude stream-json) -> 早期 PTY_BIND(ptyId 占位) -> autoWatchTranscript 轮询 JSONL 出现 -> 提取 claudeId -> bindPtyToClaudeSession -> PTY_BIND(真实)。
 - **resume**：SESSION_RESUME -> `claude -r <claudeId>`（不发 SessionStart）-> 依赖 autoWatchTranscript 绑定。
+- **PTY 退出清理**：`onExit` 回调 → `ptyToClaudeMap.get(sid)` 查真实 claudeId → `sendToRenderers(SESSION_STATUS, {status:'Completed'})` + `sendToRenderers(PTY_UNBIND, {ptyId:sid, claudeId})` → `unbindPtyFromClaudeSession(claudeId)` 清理主进程映射。**不能用 `unbindPtyFromClaudeSession(sid)`**（迁移后 `claudeToPtyMap` key 为真实 claudeId，sid lookup 失败 early return）。不依赖 SessionEnd Hook（PTY 退出时不一定触发）。
+- **`sendToRenderers` 辅助函数**：统一向 mainWindow + notificationWindow 广播事件，避免分散的 `mainWindow?.webContents.send` + `notificationWindow?.webContents.send` 重复代码。
 - **衍生持久化**：INSERTION_APPEND/PATCH/MILESTONE_SAVE/GIT_MARK_SAVE/SESSION_META_WRITE -> appendFileSync 对应 sidecar。
 - **/branch 检测**：PTY stdout 正则 `Branched[\s─\-]+conversation` -> branch 握手流程。
+- **Insight PTY 流程**：`INSIGHT_RUN` handler -> spawn 裸 claude PTY（`ptyManager.startBare`）-> `handleTrustFolderPrompt` 自动确认 trust 对话框（`TRUST_DIALOG_RE` 匹配压缩文本，`\s*` 处理空格压缩）-> 15s 定时器兜底发送 `/insights\r`（不依赖 onData 文本检测：Windows GBK 环境下 `❯` 被损坏为 `鉁?`、`*` 被 ANSI 转义序列包裹导致 `stripAnsi` 后不出现）-> 输出缓冲（`outputBuffer`，最多 2KB）累积 + 4 模式宽松正则匹配完成信号（`insights?\s+(report|generated|ready)` / `\.html\b` / `report\s+ready` / `generated\s+(your|the)`）-> `handleCompletion` 从缓冲提取 `file://` 路径（`/file:\/\/[^\s"']+\.html/i`）-> `openNotificationWindow()` 自动创建通知窗口（幂等）-> 1s 延迟等待页面加载 -> `sendToRenderers(IPC.INSIGHT_REPORT_READY, {filePath})` 广播。2min 超时兜底销毁 PTY。`onExit` 兜底：若 `completed=false` 则调用 `handleCompletion` 从缓冲提取路径。
 
 ### 状态机
 

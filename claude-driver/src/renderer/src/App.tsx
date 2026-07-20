@@ -9,7 +9,7 @@ import TitleBar from './components/TitleBar/TitleBar'
 import BottomBar from './components/BottomBar/BottomBar'
 import GlobalMonitorPage from './features/global-monitor/GlobalMonitorPage'
 import ProjectMonitorPage from './features/project-monitor/ProjectMonitorPage'
-import NotificationsPage from './features/notifications/NotificationsPage'
+import NotificationWindowPage from './features/notifications/NotificationWindowPage'
 import InitSopModal from './features/global-monitor/InitSopModal'
 import GlobalSettingsModal from './features/settings/GlobalSettingsModal'
 import TerminalPage from './features/terminal/TerminalPage'
@@ -23,7 +23,7 @@ import { uiLanguageAtom } from './i18n'
 import { useT } from './i18n'
 import type { UILanguage } from './i18n/types'
 import type { DriverConfig } from '@shared/types/index'
-import { unreadCountAtom, pendingRequestCountAtom, notificationQueueAtom } from './atoms/notification.atom'
+import { pendingRequestCountAtom, notificationQueueAtom } from './atoms/notification.atom'
 import { claimedProjectsAtom, projectsAtom, activeProjectIdAtom } from './atoms/projects.atom'
 import { insightStateAtom, insightReportPathAtom, insightErrorAtom } from './atoms/insight.atom'
 import { IPC } from '@shared/events/ipc-channels'
@@ -39,7 +39,7 @@ function parseHash(): { route: string; params: URLSearchParams } {
   }
 }
 
-export type TabId = 'global' | 'project' | 'notifications'
+export type TabId = 'global' | 'project'
 
 // ── 内层组件（在 JotaiProvider 内部，可访问 store）────────────────────────
 
@@ -85,10 +85,10 @@ function AppInner(): React.JSX.Element {
     })
   }, [store])
 
-  // 桌面通知点击时切换到通知 tab
+  // 桌面通知点击时打开独立通知窗口
   useEffect(() => {
     const off = window.api.on(IPC.NOTIFICATION_FOCUS_TAB, () => {
-      setActiveTab('notifications')
+      void window.api.invoke(IPC.NOTIFICATION_WINDOW_OPEN)
     })
     return off
   }, [])
@@ -119,8 +119,7 @@ function AppInner(): React.JSX.Element {
           metadata: { reportPath: payload.filePath },
         }]
       })
-      // 自动切换到通知 tab
-      setActiveTab('notifications')
+      // 注：通知 tab 已移至独立窗口，insight 报告就绪通知由 notificationQueueAtom 持有
     })
     return off
   }, [store, setInsightState, setInsightReportPath, setInsightError])
@@ -130,7 +129,6 @@ function AppInner(): React.JSX.Element {
   const todayTokens        = useAtomValue(todayTokensAtom)
   const todayCostUsd       = useAtomValue(todayCostUsdAtom)
   const monthlyTokens      = useAtomValue(tokenStatsAtom).monthlyTokens
-  const notifCount         = useAtomValue(unreadCountAtom)
   const pendingRequests    = useAtomValue(pendingRequestCountAtom)
   const claimedProjects    = useAtomValue(claimedProjectsAtom)
   const allProjects        = useAtomValue(projectsAtom)
@@ -199,13 +197,11 @@ function AppInner(): React.JSX.Element {
           />
         )}
         {activeTab === 'project' && <ProjectMonitorPage />}
-        {activeTab === 'notifications' && <NotificationsPage />}
       </main>
 
       <BottomBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        notificationCount={notifCount}
         monthlyTokens={monthlyTokens}
         activeProjectTokens={activeProjectTokens}
         projectCount={claimedProjects.length}
@@ -219,7 +215,7 @@ function AppInner(): React.JSX.Element {
         <div
           className="app-insight-badge"
           title={t('app.insightBadgeTooltip')}
-          onClick={() => setActiveTab('notifications')}
+          onClick={() => void window.api.invoke(IPC.NOTIFICATION_WINDOW_OPEN)}
         >
           <span className="app-insight-spinner">⟳</span>
           <span>{t('app.insightBadge')}</span>
@@ -268,6 +264,16 @@ function App(): React.JSX.Element {
     return (
       <JotaiProvider>
         <ChatPage sessionId={sessionId} />
+      </JotaiProvider>
+    )
+  }
+
+  // 独立通知窗口：#/notifications（M10）
+  if (route === 'notifications') {
+    console.log('[App] Notifications route')
+    return (
+      <JotaiProvider>
+        <NotificationWindowPage />
       </JotaiProvider>
     )
   }

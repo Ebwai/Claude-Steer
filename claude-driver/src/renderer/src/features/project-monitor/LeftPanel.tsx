@@ -14,7 +14,6 @@ import { useT } from '../../i18n'
 import PlanSection from './PlanSection'
 import AgentBlock from './AgentBlock'
 import ContextPanel from './ContextPanel'
-import RequestApprovalPanel from './RequestApprovalPanel'
 import StatusBar from './StatusBar'
 import './LeftPanel.css'
 
@@ -133,11 +132,6 @@ function LeftPanel(): React.JSX.Element {
           })
         )}
       </div>
-
-      <div style={{ flex: 1, minHeight: 0 }} />
-
-      {/* S2 T5: 权限请求审批框（层③）——有待审批请求时显示 */}
-      <RequestApprovalPanel />
 
       {/* S2 T4: 上下文面板（层④）——常驻，有 session 时传入 session 列表 */}
       <ContextPanel

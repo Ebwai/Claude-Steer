@@ -25,13 +25,13 @@ graph TD
 
 ### API 概览
 
-- **`session-core.atom`**：`activeSessionsAtom: atom<Map<string,Session>>`、`ptySessionIdsAtom: atom<Set<string>>`、派生 `sessionByIdAtom`/`runningSessionCountAtom`。
+- **`session-core.atom`**：`activeSessionsAtom: atom<Map<string,Session>>`、`ptySessionIdsAtom: atom<Set<string>>`（由 `addToRealtime`/`removeFromRealtime` 配对写入，是 `runningProjectsAtom` 的关键依赖）、派生 `sessionByIdAtom`/`runningSessionCountAtom`。
 - **`pty-binding.atom`**：`ptyBindingsAtom: atom<PtyBindings>`（双向 Map）。
 - **`branch.atom`**：`sessionRelationsAtom: atom<Map<string,SessionRelation>>`、`branchCountAtom: atom<Map<string,number>>`。
 - **`agent-block.atom`**：`agentBlocksAtom: atom<Map<string,AgentBlockState>>`、`sessionFrameHeightsAtom`（atomFamily）、`allFrameHeightsAtom`、`subagentIdsAtom`、`agentCallCountAtom`、`activeSubagentSlotsAtom`、`pendingBtwAtom`、`nodeYOffsetsAtom`。
 - **`timeline.atom`**：`timelineBySessionAtom`、`lineInsertionsBySessionAtom`、`subagentTimelineAtom`、`scrubberIndexAtom`、`cursorNodeIndexAtom`。
 - **`context-panel.atom`**：`contextPanelAtom`、`selectedContextAgentAtom`。
-- **`projects.atom`**：`projectsAtom`、派生 `projectByIdAtom`/`claimedProjectsAtom`/`pendingProjectCountAtom`/`allPlanNodesMapAtom`、atomFamily `planNodesByProjectAtom`/`projectSettingsAtom`/`planIndicatorsByProjectAtom`/`milestonesByProjectAtom`、`activeProjectIdAtom`。
+- **`projects.atom`**：`projectsAtom`、派生 `projectByIdAtom`/`claimedProjectsAtom`/`pendingProjectCountAtom`/`allPlanNodesMapAtom`/`runningProjectsAtom`（派生：ptySessionIds.has + Running/Paused + pathMatches → RunningProject[]）、atomFamily `planNodesByProjectAtom`/`projectSettingsAtom`/`planIndicatorsByProjectAtom`/`milestonesByProjectAtom`、`activeProjectIdAtom`。
 - **`permission.atom`**：`permissionRequestsAtom`。
 - **`notification.atom`**：`notificationQueueAtom`、派生 `unreadCountAtom`/`pendingRequestCountAtom`。
 - **`pending-starts.atom`**：`pendingPtyStartsAtom: atom<Map<string,PendingPtyStart>>`。
@@ -58,8 +58,9 @@ graph TD
 ### 关键流程
 
 1. **IPC 事件** -> business -> capabilities -> store.set(atom) -> 订阅组件 re-render
-2. **派生 atom**：tokenStatsAtom 聚合 activeSessions + sessionTokens + driverConfig；agentLabelsAtom 计算主线/AgentN/Branch 标签
-3. **atomFamily**：按 sessionId/projectId keyed，避免全局重渲染
+2. **PTY 生命周期清理**：PTY 退出 → `removeFromRealtime(store, claudeId)` → `ptySessionIdsAtom` 移除 → `runningProjectsAtom` 重算（`ptySessionIds.has` 不再满足）→ 项目分组消失。`removeFromRealtime` 是 `ptySessionIdsAtom` 的唯一写入口之一，必须与 `addToRealtime`（PTY_BIND 时）配对调用。
+3. **派生 atom**：tokenStatsAtom 聚合 activeSessions + sessionTokens + driverConfig；agentLabelsAtom 计算主线/AgentN/Branch 标签
+4. **atomFamily**：按 sessionId/projectId keyed，避免全局重渲染
 
 ### 状态机
 

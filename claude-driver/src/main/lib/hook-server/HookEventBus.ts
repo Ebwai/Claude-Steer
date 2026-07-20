@@ -11,14 +11,14 @@ import type { HookPayload, StatusLineData, HookEvent } from '../../../shared/typ
 import { IPC } from '../../../shared/events/ipc-channels'
 import { getUserHooksForEvent } from '../config/SettingsManager'
 
-type GetWindow = () => BrowserWindow | null
+type GetWindows = () => BrowserWindow[]
 
 /**
  * 创建 Hook EventBus
  * @param getWindow 返回当前主窗口的函数（延迟获取，避免启动时 window 尚未创建）
  * @param port 仪表盘 Hook Server 端口（用于过滤 app 自身注入的 curl 命令）
  */
-export function createHookEventBus(getWindow: GetWindow, port: number): {
+export function createHookEventBus(getWindows: GetWindows, port: number): {
   dispatchHook: (payload: HookPayload) => void
   dispatchStatusLine: (data: StatusLineData) => void
 } {
@@ -39,24 +39,22 @@ export function createHookEventBus(getWindow: GetWindow, port: number): {
     }
   }
 
-  /** 安全获取窗口 webContents（窗口可能已关闭或未就绪） */
+  /** 广播到所有目标窗口（窗口可能已关闭或未就绪） */
   function send(channel: string, data: unknown): void {
-    const win = getWindow()
-    if (!win || win.isDestroyed()) {
-      console.warn(`[HookEventBus] Window not ready, dropping event on channel: ${channel}`)
-      return
+    const windows = getWindows()
+    for (const win of windows) {
+      if (!win || win.isDestroyed()) continue
+      if (win.webContents.isLoading()) {
+        // 页面还在加载中，延迟 500ms 重试一次（捕获当前 win 引用）
+        setTimeout(() => {
+          if (win && !win.isDestroyed() && !win.webContents.isLoading()) {
+            win.webContents.send(channel, data)
+          }
+        }, 500)
+        continue
+      }
+      win.webContents.send(channel, data)
     }
-    if (win.webContents.isLoading()) {
-      // 页面还在加载中，延迟 500ms 重试一次
-      setTimeout(() => {
-        const w = getWindow()
-        if (w && !w.isDestroyed() && !w.webContents.isLoading()) {
-          w.webContents.send(channel, data)
-        }
-      }, 500)
-      return
-    }
-    win.webContents.send(channel, data)
   }
 
   return {

@@ -16,18 +16,18 @@ graph TD
 
 ### 定位与职责
 
-- **职责**：38px 底部导航栏。3 tab（global/project/notifications）+ 右侧统计（tokens/项目数/agents/pending）+ 设置按钮。pixel-faithful 复刻 `.btabs`。
+- **职责**：38px 底部导航栏。2 tab（global/project）+ 右侧统计（tokens/项目数/agents/pending）+ 设置按钮。通知入口已迁移至 TitleBar 的独立通知窗口按钮，不属于 BottomBar 边界。pixel-faithful 复刻 `.btabs`。
 - **边界**：导航 + 统计展示；不含业务逻辑。
 
 ### 内部组成
 
-- **BottomBar.tsx**：props（activeTab/onTabChange/notificationCount/monthlyTokens/activeProjectTokens/projectCount/agentCount/pendingRequests/onOpenSettings）。
+- **BottomBar.tsx**：props（activeTab/onTabChange/monthlyTokens/activeProjectTokens/projectCount/agentCount/pendingRequests/onOpenSettings）。
 
 ### 依赖与联动
 
 - **内部依赖**：App（TabId 类型）；i18n。
 - **通信方式**：纯 props 回调。
-- **关键交互场景**：onTabChange 切 tab；onOpenSettings 开 GlobalSettingsModal。
+- **关键交互场景**：onTabChange 在 global/project 间切换；onOpenSettings 开 GlobalSettingsModal；通知窗口由 TitleBar 独立打开。
 
 ### 技术选型
 

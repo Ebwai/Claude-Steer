@@ -13,7 +13,8 @@ graph TD
     HookServer -->|POST /hooks /statusline| Http["Node http :39521"]
     HookServer --> HookEventBus
     HookEventBus -->|enrich| SettingsManager["config/SettingsManager getUserHooksForEvent"]
-    HookEventBus -.webContents.send.-> Renderer["IPC.HOOK_EVENT / STATUS_LINE"]
+    HookEventBus -.webContents.send.-> MW["mainWindow"]
+    HookEventBus -.webContents.send.-> NW["notificationWindow"]
 ```
 
 ### 定位与职责

@@ -133,6 +133,8 @@ export function createPtyBindHandler(store: Store) {
 
   function handleUnbind(payload: PtyUnbindPayload): void {
     unbindPty(store, payload.ptyId, payload.claudeId)
+    // PTY 解绑时同步清理 ptySessionIdsAtom，确保 runningProjectsAtom 重新计算
+    removeFromRealtime(store, payload.claudeId)
     console.log(`[BL-1] PTY_UNBIND: PTY ${payload.ptyId} unbound from Claude ${payload.claudeId}`)
   }
 

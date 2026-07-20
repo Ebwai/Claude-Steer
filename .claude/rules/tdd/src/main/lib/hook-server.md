@@ -27,10 +27,10 @@ graph TD
   - `startHookServer(port: number, handlers: HookServerHandlers): Promise<http.Server>`
   - `stopHookServer(server: http.Server): Promise<void>`
 - **`HookEventBus`**
-  - `createHookEventBus(getWindow: GetWindow, port: number): { dispatchHook, dispatchStatusLine }`
+  - `createHookEventBus(getWindows: GetWindows, port: number): { dispatchHook, dispatchStatusLine }`
 - **Types**:
   - `HookServerHandlers { onHookEvent: (payload: HookPayload) => void, onStatusLine: (data: StatusLineData) => void, onPortConflict: (port: number) => void, onError: (err: Error) => void }`
-  - `GetWindow = () => BrowserWindow | null`
+  - `GetWindows = () => BrowserWindow[]`
 
 ### 数据模型
 
@@ -40,10 +40,10 @@ graph TD
 
 ### 关键流程
 
-1. **Hook 接收**：POST `/hooks` -> 解析 HookPayload -> dispatchHook -> enrich user_hooks（getUserHooksForEvent）-> webContents.send IPC.HOOK_EVENT
+1. **Hook 接收**：POST `/hooks` -> 解析 HookPayload -> dispatchHook -> enrich user_hooks（getUserHooksForEvent）-> 广播 IPC.HOOK_EVENT 到 mainWindow + notificationWindow（如已打开）
 2. **StatusLine 接收**：POST `/statusline` -> 解析 StatusLineData -> dispatchStatusLine -> webContents.send IPC.STATUS_LINE
 3. **端口冲突**：onPortConflict 回调（不崩）
-4. **窗口时序**：闭包 getWindow 避免 window 未就绪；页面加载中 500ms 后重试 send
+4. **窗口时序**：闭包 getWindows 返回目标窗口列表；广播到所有目标窗口；页面加载中 500ms 后重试 send
 
 ### 状态机
 

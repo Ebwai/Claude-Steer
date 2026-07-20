@@ -141,21 +141,35 @@ graph TD
 
 ```mermaid
 graph TD
-    NotificationsPage --> Perm["permissionRequestsAtom"]
-    NotificationsPage --> Notif["notificationQueueAtom"]
-    NotificationsPage -->|IPC.PERMISSION_RESPOND| PTY
-    NotificationsPage -->|IPC.OPEN_WEBVIEW| WebView
+    NW["NotificationWindowPage"] --> Store["自建 Jotai vanilla store"]
+    Store --> PH["createPermissionHandler"]
+    Store --> BH["createPtyBindHandler"]
+    Store --> SL["createSessionLifecycle"]
+    Store --> PL["projects 加载"]
+    NW --> SST["shared/types SessionStatus"]
+    NW --> PSS["ProjectSplitSection"]
+    PSS --> RP["runningProjectsAtom"]
+    PSS --> NI["NotificationItem"]
+    NI -->|展开| TDR["toolDetailRender (共享 utility)"]
+    NI -->|IPC.PERMISSION_RESPOND| PTY
+    NI -->|IPC.PERMISSION_DISMISS| Badge["角标更新"]
+    PH -.IPC.HOOK_EVENT.-> Hook["主进程 HookEventBus 广播"]
+    BH -.IPC.PTY_BIND/UNBIND.-> Hook
+    SL -.IPC.SESSION_STATUS.-> Hook
 ```
 
 ### 模块概览
 
-- **职责**：消息通知页。左侧权限请求列表（按 Agent 分组 + info 消息）+ 右侧详情（同意/同意带消息/不同意 + info 打开报告）。
-- **输入**：atoms（permission/notification）。
-- **输出**：UI 渲染 + IPC invoke。
+- **职责**：独立系统级通知窗口（`#/notifications`，独立 BrowserWindow pop-out）。按"正在运行的项目"纵向分割展示权限请求 + insight 报告通知，每条 2 行紧凑布局 + 可展开详情（复用历史面板触发线可视化）。
+- **输入**：IPC.HOOK_EVENT（PermissionRequest）/ PTY_BIND / PTY_UNBIND / SESSION_STATUS / PROJECT_LIST / INSIGHT_REPORT_READY（均由主进程广播）；SESSION_STATUS 的 `status` 字段使用 shared `SessionStatus` 联合类型。
+- **输出**：UI 渲染 + IPC.PERMISSION_RESPOND / PERMISSION_DISMISS。
 
 ### API 概览
 
-- **`NotificationsPage`**：读 permissionRequestsAtom/notificationQueueAtom；state `{ selectedId }`；调 dequeueRequest capability；内部 NotificationList/NotificationDetail/InfoItem/InfoDetail。
+- **`NotificationWindowPage`**：窗口页根。自建 JotaiProvider + vanilla store，注册 handler 工厂子集（createPermissionHandler + createPtyBindHandler + createSessionLifecycle + projects 加载）。订阅 IPC.HOOK_EVENT / PTY_BIND / PTY_UNBIND / SESSION_STATUS / PROJECT_LIST / INSIGHT_REPORT_READY。
+- **`ProjectSplitSection`**：项目分割区。读 `runningProjectsAtom`，纵向排列每个运行中项目的分割区（项目名头 + 独立滚动通知列表）。项目停止运行时分割区及通知移除。
+- **`NotificationItem`**：单条通知项（2 行）。Line 1：Agent 框名称（`req.agentName`）+ 调用名称 + 展开按钮 + 关闭按钮。Line 2：4 交互 Yes/No（同意/同意+消息/拒绝/拒绝+消息，逻辑同原 RequestApprovalPanel）。展开显示 `toolDetailRender` 详情。
+- **`toolDetailRender.tsx`**（共享 utility）：`renderToolDetail(toolName, badgeContent, t)` + `buildToolCompact(toolName, badgeContent, t)` + `hasToolDetail(toolName, badgeContent)`。从 LineInsertionItem 抽取，供 LineInsertionItem 和 NotificationItem 共用。
 
 ### 数据模型
 ### 关键流程
@@ -176,12 +190,12 @@ graph TD
     LeftPanel --> AgentBlock
     LeftPanel --> PlanSection
     LeftPanel --> ContextPanel
-    LeftPanel --> RequestApprovalPanel
+    LeftPanel --> StatusBar
 ```
 
 ### 模块概览
 
-- **职责**：项目监控页根。顶部 tab + 设置栏 + 左半实时工作区（LeftPanel）+ 右半历史画布（ProcessLineCanvas）。
+- **职责**：项目监控页根。顶部 tab + 设置栏 + 左半实时工作区（LeftPanel）+ 右半历史画布（ProcessLineCanvas）；LeftPanel 由 Plan、唯一弹性 Agent 列表、ContextPanel、StatusBar 纵向组成，不再包含或预留审批面板空间。
 - **输入**：atoms（projects/sessions/agent-block/timeline/context-panel/permission/viewport）。
 - **输出**：UI 渲染。
 

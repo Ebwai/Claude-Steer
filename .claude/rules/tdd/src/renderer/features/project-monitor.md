@@ -17,12 +17,12 @@ graph TD
     LeftPanel --> AgentBlock
     LeftPanel --> PlanSection
     LeftPanel --> ContextPanel
-    LeftPanel --> RequestApprovalPanel
+    LeftPanel --> StatusBar
 ```
 
 ### 模块概览
 
-- **职责**：项目监控页根。顶部 tab + 设置栏 + 左半实时工作区（LeftPanel）+ 右半历史画布（ProcessLineCanvas）。
+- **职责**：项目监控页根。顶部 tab + 设置栏 + 左半实时工作区（LeftPanel）+ 右半历史画布（ProcessLineCanvas）；LeftPanel 由 Plan、唯一弹性 Agent 列表、ContextPanel、StatusBar 纵向组成，不再包含或预留审批面板空间。
 - **输入**：atoms（projects/sessions/agent-block/timeline/context-panel/permission/viewport）。
 - **输出**：UI 渲染。
 
@@ -41,6 +41,7 @@ graph TD
 3. Plan 折叠区（M/S/T 树 + 刷新）
 4. 项目标签栏（running 项目 tabs + 所有项目下拉）
 5. 设置栏（8 下拉 + 添加并行 Agent + 同步到 GitHub）
+6. LeftPanel 高度分配：`.lp-agent-list` 以 `flex: 1; min-height: 0` 消化 PlanSection 与底部固定面板之外的全部剩余高度，列表自身纵向滚动；其后直接渲染 ContextPanel，使两者边界重合。
 
 ### 状态机
 
@@ -52,7 +53,8 @@ graph TD
 
 ### 监控与测试
 
-- **日志点**：Session 切换、Git 操作、Plan 刷新。
+- **日志点**：Session 切换、Git 操作、Plan 刷新；纯 CSS 高度分配不新增运行时日志。
+- **布局测试**：窗口纵向缩放、无活跃 Session、单/多 Agent 列表场景下，Agent 列表底边均直接连接 ContextPanel 顶部分隔线，列表内容超高时仅列表内部滚动。
 - **测试缺口 [待补]**：无组件测试。
 
 ## canvas

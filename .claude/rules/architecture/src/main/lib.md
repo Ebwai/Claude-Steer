@@ -81,7 +81,7 @@ graph TD
 
 - **SettingsManager.ts**：`~/.claude/settings.json` 原子读写；Hook 配置注入（13 事件类型，Unix curl + Windows .ps1 bridge 生成）；statusLine 注入；env 块（provider）读写；agents/skills/hooks/tools/mcp 5 类配置组读取（readAllConfigGroups）。
 - **ClaudeJsonManager.ts**：`~/.claude.json` 原子读写；全局 MCP servers、项目 `.mcp.json`、MCP enable/disable 状态；onboarding/trust 旁路。
-- **DriverConfigStore.ts**：`~/.claude-driver/config.json` 原子读写（仪表盘自身配置：token 单价、预算、通知开关、主题、语言）。
+- **DriverConfigStore.ts**：`~/.claude-driver/config.json` 原子读写（仪表盘自身配置：token 单价、预算、通知开关、通知窗口始终置顶 `notifWindowAlwaysOnTop`、通知窗口自动打开 `notifWindowAutoOpen`、主题、语言）。
 
 ### 依赖与联动
 
@@ -160,7 +160,8 @@ graph TD
     HookServer -->|POST /hooks /statusline| Http["Node http :39521"]
     HookServer --> HookEventBus
     HookEventBus -->|enrich| SettingsManager["config/SettingsManager getUserHooksForEvent"]
-    HookEventBus -.webContents.send.-> Renderer["IPC.HOOK_EVENT / STATUS_LINE"]
+    HookEventBus -.webContents.send.-> MW["mainWindow"]
+    HookEventBus -.webContents.send.-> NW["notificationWindow"]
 ```
 
 ### 定位与职责
@@ -238,8 +239,8 @@ graph TD
 ### 依赖与联动
 
 - **内部依赖**：electron（app/nativeImage）；shared/events（IPC）。
-- **通信方式**：由 index.ts 在 PermissionRequest Hook 触发 notify+increment、审批后 decrement；IPC.NOTIFICATION/NOTIFICATION_FOCUS_TAB 推送。
-- **关键交互场景**：权限请求 -> 桌面通知 + 角标 +1；审批 -> 角标 -1；点击通知 -> 切换通知 tab。
+- **通信方式**：由 index.ts 在 PermissionRequest Hook 触发 notify+increment、审批后 decrement、关闭后 decrement；IPC.NOTIFICATION/NOTIFICATION_FOCUS_TAB 推送。
+- **关键交互场景**：权限请求 -> 桌面通知 + 角标 +1 + 自动打开独立通知窗口（可配置默认开，若已隐藏则恢复+抢焦点）；审批 -> 角标 -1；关闭 -> 角标 -1；点击桌面通知 -> 聚焦独立通知窗口。
 
 ### 技术选型
 ### 非功能约束

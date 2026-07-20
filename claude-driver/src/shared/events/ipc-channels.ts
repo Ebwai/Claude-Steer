@@ -172,6 +172,8 @@ export const IPC = {
   CHAT_START: 'chat:start',
   /** 打开聊天气泡窗口（renderer → main invoke；payload: { sessionId }） */
   CHAT_WINDOW_OPEN: 'chat:window-open',
+  /** 打开/聚焦独立通知窗口（renderer → main invoke；无 payload） */
+  NOTIFICATION_WINDOW_OPEN: 'notification-window:open',
   /** 主进程 → 聊天窗口推送解析后的消息（stream-json 单条）*/
   CHAT_MESSAGE: 'chat:message',
   /** 在新 BrowserWindow 中打开本地 HTML 文件（renderer → main invoke） */

@@ -74,13 +74,13 @@ graph TD
 
 ### 内部组成
 
-- **session-core.atom**：`activeSessionsAtom`(claudeId->Session) + `ptySessionIdsAtom`(实时可见集) + 派生 `runningSessionCountAtom`。
+- **session-core.atom**：`activeSessionsAtom`(claudeId->Session) + `ptySessionIdsAtom`(实时可见集，由 `addToRealtime`/`removeFromRealtime` 配对写入) + 派生 `runningSessionCountAtom`。
 - **pty-binding.atom**：PTY↔Claude 双向绑定表 `ptyBindingsAtom`。
 - **branch.atom**：`sessionRelationsAtom`(child->parent) + `branchCountAtom`。
 - **agent-block.atom**：Agent Block 实时状态（工具/经验/subagent/insight）+ frame 高度图 + subagent 槽位。
 - **timeline.atom**：`timelineBySessionAtom` + `lineInsertionsBySessionAtom` + `subagentTimelineAtom` + 导游标 `scrubber/cursorNodeIndexAtom`。
 - **context-panel.atom**：每会话上下文组件列表 + `selectedContextAgentAtom`。
-- **projects.atom**：项目 Map + 派生 claimed/pending + per-project PlanNode/PlanIndicator/Milestone/ProjectSettings（atomFamily）。
+- **projects.atom**：项目 Map + 派生 claimed/pending + per-project PlanNode/PlanIndicator/Milestone/ProjectSettings（atomFamily）+ `runningProjectsAtom`（派生：依赖 `activeSessionsAtom` + `ptySessionIdsAtom` + `projectsAtom`，ptySessionIds.has + Running/Paused + pathMatches → {projectId, name, sessionCount}[]）。`ptySessionIdsAtom` 的清理（`removeFromRealtime`）是项目分组消失的前提。
 - **permission.atom** / **notification.atom** / **pending-starts.atom** / **insight.atom** / **scheduler.atom** / **viewport.atom** / **stats.atom**（token 统计派生）/ **agentLabels.atom**（派生标签）。
 - **sessions.atom**：barrel re-export（向后兼容）。
 
@@ -240,7 +240,7 @@ graph TD
 
 - **global-monitor**：全局监控页（项目画板 + 右半面板 + 创建向导 + 初始化 SOP）。含 `nodes/`。
 - **project-monitor**：项目监控页（实时工作区 + 历史工作区 + Plan + Git）。含 `canvas/`。
-- **notifications**：消息通知页（权限请求审批 + info 消息）。
+- **notifications**：独立通知窗口（`#/notifications`，独立 BrowserWindow pop-out）。按运行中项目分割 + 2 行通知项 + 可展开详情（复用历史面板触发线可视化）。
 - **settings**：全局设置 Modal（10 section）。含 `sections/`。
 - **chat**：闲聊气泡 pop-out（`#/chat`）。
 - **terminal**：独立终端 pop-out（`#/terminal`，xterm.js）。

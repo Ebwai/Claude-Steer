@@ -28,7 +28,8 @@
 
 /* ── Agent Block 列表区（层②） ── */
 .lp-agent-list {
-  flex: 3;
+  /* M11: 独占 ContextPanel 上方剩余高度，底边直接衔接其顶部分隔线 */
+  flex: 1;
   overflow-y: auto;
   padding: var(--space-md) var(--space-lg);
   min-height: 0;

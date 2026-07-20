@@ -191,10 +191,10 @@ graph TD
   - `startHookServer(port: number, handlers: HookServerHandlers): Promise<http.Server>`
   - `stopHookServer(server: http.Server): Promise<void>`
 - **`HookEventBus`**
-  - `createHookEventBus(getWindow: GetWindow, port: number): { dispatchHook, dispatchStatusLine }`
+  - `createHookEventBus(getWindows: GetWindows, port: number): { dispatchHook, dispatchStatusLine }`
 - **Types**:
   - `HookServerHandlers { onHookEvent: (payload: HookPayload) => void, onStatusLine: (data: StatusLineData) => void, onPortConflict: (port: number) => void, onError: (err: Error) => void }`
-  - `GetWindow = () => BrowserWindow | null`
+  - `GetWindows = () => BrowserWindow[]`
 
 ### 数据模型
 ### 关键流程

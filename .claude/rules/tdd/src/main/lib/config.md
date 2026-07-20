@@ -56,7 +56,7 @@ graph TD
 - **`ClaudeSettings`**（internal）：hooks、statusLine、env、permissions、model 等字段。
 - **`McpServerConfig`**：type、command?、args?、env?、url?。
 - **`ProjectMcpState`**：enabledMcpjsonServers、disabledMcpjsonServers。
-- **`DriverConfig`**（shared/types）：tokenPriceInputPerM、tokenPriceOutputPerM、monthlyBudgetAlertUsd、desktopNotificationsEnabled、themePreference、uiLanguage?。
+- **`DriverConfig`**（shared/types）：tokenPriceInputPerM、tokenPriceOutputPerM、monthlyBudgetAlertUsd、desktopNotificationsEnabled、notifWindowAlwaysOnTop?（默认 true）、notifWindowAutoOpen?（默认 true）、themePreference、uiLanguage?。
 
 ### 关键流程
 

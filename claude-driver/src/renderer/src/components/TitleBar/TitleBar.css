@@ -94,3 +94,18 @@
   animation: pulse 1.8s infinite;
   display: block;
 }
+
+/* 通知窗口按钮（非拖动区域） */
+.titlebar-notif-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s;
+}
+.titlebar-notif-btn:hover {
+  background: var(--bg3, rgba(255, 255, 255, 0.05));
+}

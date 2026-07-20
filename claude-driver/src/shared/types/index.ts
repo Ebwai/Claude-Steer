@@ -386,6 +386,10 @@ export interface DriverConfig {
   monthlyBudgetAlertUsd: number
   /** 桌面通知总开关，默认 true */
   desktopNotificationsEnabled: boolean
+  /** 通知窗口始终置顶，默认 true */
+  notifWindowAlwaysOnTop?: boolean
+  /** 权限请求时自动打开通知窗口，默认 true */
+  notifWindowAutoOpen?: boolean
   /** 主题偏好，默认 'dark' */
   themePreference: 'dark' | 'light'
   /** 仪表盘界面语言，默认 'zh-CN' */

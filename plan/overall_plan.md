@@ -1,10 +1,5 @@
 # Claude Driver — 总体计划 (overall_plan.md)
 
-> **版本**：v0.2.0-MVP  
-> **目标**：实现 PRD Phase 1 全部功能  
-> **兼容**：Claude Code ≥ 2.1.104  
-> **更新日期**：2026-04-15（依据 PRD v0.2.0 + 架构 v0.1.0 更新）
-
 ---
 
 ## 架构选型理由
@@ -50,7 +45,7 @@
 
 ---
 
-## M1 — 项目脚手架与基础架构层 [ ]
+## M1 — 项目脚手架与基础架构层 [x]
 
 > **交付物**：Electron 窗口启动，IPC 通信可用，顶/底栏骨架可见，CSS Design Token 就绪
 > **验收标准**：`npm run dev` 后窗口出现，点击底部标签无报错，主题变量在 DevTools 可见
@@ -71,7 +66,7 @@
 
 ---
 
-## M2 — 数据管道层（三通道融合）[ ]
+## M2 — 数据管道层（三通道融合）[x]
 
 > **交付物**：三通道均可接收数据，控制台可打印真实 Hook 事件和 statusLine JSON
 > **验收标准**：在真实 Claude Code 进程中执行一次工具调用，仪表盘控制台同时打印 PostToolUse 事件 + statusLine token 数据
@@ -215,7 +210,7 @@
 
 ---
 
-## M6 — 功能入口 [ ]
+## M6 — 功能入口 [x]
 
 > **交付物**：所有功能入口可交互，/insight 可生成并打开报告，定时任务可创建
 > **验收标准**：/insight 调用后生成 HTML 报告并在内嵌 WebView 打开；定时任务创建后 CronList 可查到
@@ -236,15 +231,14 @@
 - [x] T2 — 飞书平台配置向导（5步：应用创建 → 权限配置 → 长连接事件订阅 → 填写凭证 → 发布引导）
 - [x] T3 — cc-connect 配置文件生成（`~/.cc-connect/config.toml`，多项目 [[projects]] 嵌套格式）+ 服务启停 + 状态检测
 
-### S5 — 闲聊 PTY [ ]
+### S5 — 闲聊 PTY [x]
+- [x] T1 — 新增 `CHAT_START` IPC 通道 + 主进程 `startBare` handler（chatPtyIds 隔离 Hook 路由）+ CanvasPanel 按钮绑定 + `TERM_WINDOW_OPEN` 弹出终端
 
-- [ ] T1 — 新增 `CHAT_START` IPC 通道 + 主进程 `startBare` handler（chatPtyIds 隔离 Hook 路由）+ CanvasPanel 按钮绑定 + `TERM_WINDOW_OPEN` 弹出终端
+### S4 — Plugins 面板 [x]
 
-### S4 — Plugins 面板 [ ]
-
-- [ ] T1 — 已安装 Plugin 列表（读取 `~/.claude/settings.json` 的 `enabledPlugins` 字段）+ 删除功能
-- [ ] T2 — Plugin 详情展示（点击后显示：应用场景/作用/包含的 MCP/Skills/Hooks）
-- [ ] T3 — 添加 Plugin 按钮（第一阶段：点击显示"还在开发中"提示，不执行任何操作）
+- [x] T1 — 已安装 Plugin 列表（读取 `~/.claude/settings.json` 的 `enabledPlugins` 字段）+ 删除功能
+- [x] T2 — Plugin 详情展示（点击后显示：应用场景/作用/包含的 MCP/Skills/Hooks）
+- [x] T3 — 添加 Plugin 按钮（第一阶段：点击显示"还在开发中"提示，不执行任何操作）
 
 ---
 
@@ -356,6 +350,193 @@
 
 ---
 
+## M10 - 聚合通知独立窗口化 [ ]
+
+> **背景**：当前聚合通知（权限请求审批）分散在两处：① 主窗口 LeftPanel 的 `RequestApprovalPanel`（实时工作区弹出审批卡片）；② 主窗口 notifications tab 的 `NotificationsPage`（列表+详情双栏）。用户希望将聚合通知独立成一个单独窗口，与实时监控面板解耦，窗口真正独立于主窗口（主窗口最小化不影响它），并按"正在运行的项目"自动分割，每条通知支持展开查看详情（复用历史工作面板触发线的可视化）。
+> **需求**（已与用户确认 17 项决策）：
+>   1. 独立 `BrowserWindow`，不设 `parent`（仿 `chatWindow`），主窗口最小化不影响它；`alwaysOnTop` 可配置（默认开，全局设置·通知开关）；600×600 正方形默认尺寸（宽参照原 rap-card）
+>   2. 单例窗口（非多实例）；顶栏新增"打开独立通知窗口"按钮；移除主窗口 notifications tab 与 LeftPanel 的 `RequestApprovalPanel`
+>   3. 三个打开途径：① 用户手动点击顶栏按钮；② 权限请求来时自动打开（可配置默认开，全局设置·通知开关；即使窗口隐藏到托盘）；③ insight 报告完成时自动打开（窗口不存在则创建，已存在则聚焦）
+>   4. 关闭按钮 = 隐藏到托盘（窗口存活），新通知来时恢复显示+抢焦点置顶
+>   5. 窗口内按"正在运行的项目"纵向分割，每区=项目名头+独立滚动列表；项目停止运行时分割区+通知全部移除（无兜底区）
+>   6. 运行中项目判定：镜像 LeftPanel 的 `projectSessions` 逻辑（`ptySessionIds.has` + `Running/Paused` + `pathMatches`），count≥1 即为运行中
+>   7. 每条通知 2 行：① Agent框名称（`req.agentName`，主线程/Agent(xxxxxx)）+ 调用名称 + 展开按钮 + 关闭按钮；② 4 交互 Yes/No（同意/同意+消息/拒绝/拒绝+消息，逻辑同 `RequestApprovalPanel`）
+>   8. 展开详情复用 `LineInsertionItem.renderToolDetail`，数据源 `PermissionRequest.toolInput` -> `badgeContent`；颜色复用历史面板 type 配色（工具类橙 `#e6430d` / 经验类棕 `#DA7756`）
+>   9. 通知范围：权限请求 + insight 报告完成通知（info/warning/error 类通知不在此窗口展示）
+>   10. 底层不动：Hook 层、`NotificationService`、`toolInput` 捕获均不变
+> **交付物**：
+>   1. 新增独立通知窗口能力（main 进程窗口管理 + IPC 路由 + renderer 路由 `#/notifications`）
+>   2. 顶栏按钮 + 主窗口 tab/RequestApprovalPanel 移除
+>   3. 通知窗口 UI：项目分割 + 2 行通知项 + 展开详情
+>   4. 运行中项目检测派生 atom（复用 LeftPanel 逻辑）
+>   5. 自动打开/恢复+抢焦点机制（含 insight 报告完成时的自动打开）
+>   6. 全局设置·通知新增"窗口始终置顶""权限请求时自动打开"两个开关（读写 `~/.claude-driver/config.json`，默认开）
+>   7. 更新 PRD、Architecture、TDD 文档
+> **验收标准**：
+>   1. 触发权限请求 -> 通知窗口自动打开（置顶）-> 通知项出现在对应项目分割区
+>   2. 主窗口最小化 -> 通知窗口依然可见
+>   3. 点通知项展开按钮 -> 显示工具调用详情（与历史面板触发线一致的着色与字段）
+>   4. 同意/拒绝（±消息）/关闭 四类操作正确驱动 PTY（逻辑同 RequestApprovalPanel）
+>   5. 多项目并行 -> 窗口内出现多个纵向分割区，各自独立滚动
+>   6. 项目所有 session 结束 -> 对应分割区及通知移除
+>   7. 关闭窗口 -> 隐藏到托盘；新通知来 -> 恢复+抢焦点
+>   8. 文档已更新（PRD/Architecture/TDD）
+
+> **架构选型**（决策 1-3，用户已确认全部 A 方案）：
+>   1. **通知窗口数据流**：通知窗口自建 Jotai store + 复用 handler 工厂（createPermissionHandler / createPtyBindHandler / createSessionLifecycle），HookEventBus 改广播 IPC.HOOK_EVENT/PTY_BIND/SESSION_STATUS 到 mainWindow + 通知窗口。通知窗口独立处理状态，无代码重复。选择理由：工厂函数已是现成的可复用模块（接收 store 参数），广播改动最小（改 HookEventBus.send 为 sendAll），通知窗口自包含不依赖 mainWindow renderer。
+>   2. **展开详情复用**：抽取 LineInsertionItem 的 renderToolDetail + buildToolCompact + hasToolDetail 到共享 utility `renderer/src/shared/toolDetailRender.tsx`，LineInsertionItem 和通知窗口都引用（DRY）。选择理由：这些函数已包含 Read/Write/Edit/Bash/Grep 等十类工具的完整详情渲染逻辑，抽取后零代码重复。
+>   3. **运行中项目检测**：新增 `runningProjectsAtom` 派生 atom（复用 LeftPanel projectSessions 逻辑：ptySessionIds.has + Running/Paused + pathMatches），放 `renderer/src/atoms/projects.atom.ts`。LeftPanel 现有内联逻辑替换为引用此 atom（统一数据源）。选择理由：派生 atom 自动随依赖 atom 更新，两处（LeftPanel + 通知窗口）各自 store 独立计算，无需 IPC 同步。
+
+### S1 - 修改 PRD 文档 [x]
+
+- [x] T1 - 重写概念三：消息通知界面（独立窗口化 + 项目分割 + 展开详情 + 2 行布局 + 可配置性）
+- [x] T2 - 更新机制五：系统通知推送（通知窗口替代 NotificationsPage；自动打开机制；通知窗口设置）
+- [x] T3 - 重构骨架 2.0 消息通知界面子节点；移除项目监控下的"Agent 请求审批框"骨架节点
+- [x] T4 - 移除 2.2.2 子概念"Agent 请求审批框"（功能迁到独立通知窗口）+ 重编号 2.2.3→2.2.2（上下文面板）、2.2.4→2.2.3（状态栏）
+- [x] T5 - 更新痛点映射需求6（移除"Agent 请求审批框"映射）；更新需求2/需求6 对"消息通知界面·独立通知窗口"的引用
+- [x] T6 - 更新 3.3 交互流程与 4.2 异常处理（审批框 -> 独立通知窗口）
+- [x] T7 - 更新全局设置·通知分区（新增"窗口始终置顶""权限请求时自动打开"两个开关，默认开）
+
+### S2 - 修改 Architecture 类文档 [x]
+
+- [x] T1 - 重写 `architecture/src/renderer/features/notifications.md`（独立窗口 + 项目分割 + 展开详情 + 自建 store + handler 工厂复用 + 共享 toolDetailRender）
+- [x] T2 - 修改 `architecture/src/main.md`（新增 notificationWindow 管理 + HookEventBus 广播 + 通信方式 + 关键交互场景）+ 修改 `main/lib/config.md`（新增两个 DriverConfig 字段）
+- [x] T3 - 修改 `architecture/src/renderer/atoms.md`（新增 runningProjectsAtom 派生 atom）
+- [x] T4 - 修改 `architecture/src/renderer/features/project-monitor.md`（移除 RequestApprovalPanel + 移除 PERMISSION_RESPOND）+ 修改 `renderer/features.md`（notifications 描述更新）+ 修改 `main/lib/notification.md`（自动打开机制）+ 修改 `main/lib/hook-server.md`（广播架构图）
+- [x] T5 - block-sync 同步上层文档（已运行，所有 leaf→parent 同步成功）
+
+### S3 - 修改 TDD 类文档 [x]
+
+- [x] T1 - 重写 `tdd/src/renderer/features/notifications.md`（独立窗口 + handler 工厂 + 项目分割 + 展开详情 + 窗口管理）
+- [x] T2 - 修改 `tdd/src/main/lib/notification.md`（自动打开+聚焦）+ `tdd/src/main/lib/hook-server.md`（HookEventBus 广播 API）+ `tdd/src/main/lib/config.md`（DriverConfig 新增两个字段）
+- [x] T3 - 修改 `tdd/src/renderer/atoms.md`（projects.atom 新增 runningProjectsAtom）
+- [x] T4 - block-sync 同步上层文档（已运行，所有 leaf→parent 同步成功）
+
+### S4 - 修改代码 [x]
+
+- [x] T1 - `shared/events/ipc-channels.ts`：新增 `NOTIFICATION_WINDOW_OPEN` 通道
+- [x] T2 - `main/index.ts`：openNotificationWindow() helper + IPC handler + HookEventBus 广播 + PTY_BIND/UNBIND 广播到通知窗口 + sessionCwdMap catch-up + 权限请求自动打开 + DriverConfig 读取
+- [x] T3 - `renderer/src/App.tsx`：新增 `#/notifications` 路由 + NOTIFICATION_FOCUS_TAB 改为打开通知窗口 + 移除 notifications tab 渲染 + TabId 移除 'notifications'
+- [x] T4 - `renderer/src/components/TitleBar`：新增 🔔 按钮（IPC.NOTIFICATION_WINDOW_OPEN）+ CSS
+- [x] T5 - `renderer/src/features/notifications/NotificationWindowPage.tsx`：自建 handler 工厂注册 + 项目分割 + 2 行通知项 + 展开详情（toolInput 格式化 + 按工具类型着色）+ 4 交互 Yes/No + CSS
+- [x] T6 - `renderer/src/atoms/projects.atom.ts`：新增 `runningProjectsAtom` 派生 atom + `RunningProject` 接口
+- [x] T7 - 移除 BottomBar notifications tab + AppInner notifications 渲染 + INSIGHT_REPORT_READY 不再切 tab
+- [x] T8 - i18n：zh-CN + en 新增 titlebar.openNotifications / notifications.noRequests / notifications.otherRequests / settings.notificationSection.alwaysOnTop/autoOpen
+- [x] T9 - NotificationSection.tsx 新增两个开关 + shared/types DriverConfig 新增 notifWindowAlwaysOnTop / notifWindowAutoOpen
+
+### S5 - 验收收尾 [ ]
+
+- [ ] T1 - 实测全部验收标准（8 项）
+- [ ] T2 - 同步实测与 Architecture/TDD 文档差异
+- [ ] T3 - 更新 `knowledge/Important_Info.md`（如有需要）
+
+---
+
+## M11 - 修复实时工作区与上下文面板之间的无效留白 [x]
+
+> **背景**：M10 将聚合通知审批框迁移到独立通知窗口后，项目监控页 `LeftPanel` 已不再渲染 `RequestApprovalPanel`，但审批框与上下文面板之间原有的弹性空白占位仍然保留，导致当前工作情况区的可视范围提前结束。
+> **根因**：`LeftPanel.tsx` 在 `.lp-agent-list` 与 `ContextPanel` 之间仍渲染 `<div style={{ flex: 1, minHeight: 0 }} />`；该节点继续占用纵向剩余空间，与已经移除的审批面板生命周期不一致。
+> **方案选择**：复用现有 column flex 布局，让 `.lp-agent-list` 成为上下文面板上方唯一的弹性区域，删除失去职责的空白占位。相比新增高度计算或绝对定位，此方案不引入窗口尺寸常量，可随 Windows、macOS、Ubuntu 的可用高度自适应。
+> **验收标准**：当前工作情况区的可视框底边与上下文面板顶部分隔线重合；窗口缩放、多 Agent 列表滚动、无活跃 Session 状态均不产生覆盖或额外空白。
+
+### S1 - 阅读并修改 PRD 中的对应内容 [x]
+
+- [x] T1 - 确认实时工作区纵向三层布局的边界约束并向用户说明修改点
+- [x] T2 - 用户确认后补充当前工作情况区与上下文面板无间隙衔接规则
+
+### S2 - 查找并修改 Architecture 类文档 [x]
+
+- [x] T1 - 沿 project-monitor 文档链确认 LeftPanel 弹性布局职责
+- [x] T2 - 更新对应叶子 Architecture 文档并由 block-sync 级联同步
+
+### S3 - 查找并修改 TDD 类文档 [x]
+
+- [x] T1 - 确认 LeftPanel 当前工作区、上下文面板的 CSS/Flex 实现约束
+- [x] T2 - 更新对应叶子 TDD 文档并由 block-sync 级联同步
+
+### S4 - 修改代码 [x]
+
+- [x] T1 - 删除通知审批框迁移后遗留的弹性空白占位
+- [x] T2 - 保持 Agent 列表滚动、上下文面板固定和状态栏固定行为
+
+### S5 - 验收收尾 [x]
+
+- [x] T1 - 执行验证：M11 定向 ESLint 0 error；当时发现的 M10 两个类型错误已由 M12 修复，当前全量 typecheck 通过
+- [x] T2 - 布局结构断言通过：无遗留 spacer，Agent 列表与 ContextPanel 直接相邻，`flex: 1 + min-height: 0 + overflow-y: auto` 约束完整
+- [x] T3 - PRD、Architecture、TDD 已同步，block-sync 已级联到顶层；新增 `Important_Info` 弹性占位避坑记录
+
+---
+
+## M12 - 修复独立通知窗口迁移后的两个 TypeScript 编译错误 [x]
+
+> **背景**：M10 移除 BottomBar 通知 tab、增加独立通知窗口后，全量 typecheck 暴露两个迁移残留：BottomBar 仍接收但不使用 `notificationCount`；NotificationWindowPage 将宽泛 `string` 状态写入 `SessionStatus`。
+> **根因**：旧通知 tab 的 prop/atom 订阅未完整清理；通知窗口复制 SESSION_STATUS 监听逻辑时没有复用 shared 层的状态联合类型。
+> **方案选择**：删除失去消费者的 BottomBar prop 与 App 订阅；通知窗口在 IPC 解构边界直接使用共享 `SessionStatus` 类型。保持现有运行逻辑不变，不新增重复状态定义。
+> **验收标准**：`npm run typecheck` 通过；BottomBar 仍正确显示 tokens、项目数、Agent 数、待处理权限数与设置按钮；通知窗口收到 Completed 状态后正常更新 session。
+
+### S1 - 阅读并修改 PRD 中的对应内容 [x]
+
+- [x] T1 - 核对独立通知窗口与 BottomBar 产品约束
+- [x] T2 - 确认两个错误均为实现迁移残留，PRD 无需修改
+
+### S2 - 查找并修改 Architecture 类文档 [x]
+
+- [x] T1 - 更新 BottomBar 组件边界，移除 notifications tab 与 notificationCount
+- [x] T2 - 更新 notifications 模块对 shared SessionStatus 的依赖描述
+
+### S3 - 查找并修改 TDD 类文档 [x]
+
+- [x] T1 - 更新 BottomBarProps 输入模型
+- [x] T2 - 补充 SESSION_STATUS 共享联合类型约束
+
+### S4 - 修改代码 [x]
+
+- [x] T1 - 删除 App 与 BottomBar 的无效 notificationCount 数据链
+- [x] T2 - 将 NotificationWindowPage 的 status 收窄为共享 SessionStatus
+
+### S5 - 验收收尾 [x]
+
+- [x] T1 - 全量 `npm run typecheck` 通过（node + web 均 0 error）
+- [x] T2 - BottomBar 与 NotificationWindowPage 定向 ESLint 0 error；残留引用与 diff-check 通过（App 仍有 2 个既有 lint 错误，不属于本目标）
+- [x] T3 - Architecture/TDD 叶子已经 block-sync 同步到对应父块；无新增项目特殊知识，无需更新 Important_Info
+
+---
+
+## M13 - 将独立通知窗口默认尺寸调整为 400×400 [!]
+
+> **背景**：独立通知窗口当前以 600×600 创建，用户要求默认调整为 400×400，使窗口更紧凑、减少对主工作区的遮挡。
+> **真实约束**：当前 BrowserWindow 已设置 `minWidth: 400`、`minHeight: 400`，与用户确认后的默认尺寸一致，无需修改最小尺寸。
+> **方案选择**：仅将默认 width/height 从 600 改为 400，保留最小宽高 400、窗口可自由放大、单例/置顶/托盘隐藏等行为不变。
+> **验收标准**：首次创建通知窗口时外框为 400×400；不能缩小到 400 以下但可放大；权限请求、项目分区及滚动行为不变；全量 typecheck 通过。
+
+### S1 - 阅读并修改 PRD 中的对应内容 [x]
+
+- [x] T1 - 定位独立通知窗口默认尺寸产品约束
+- [x] T2 - 将“默认正方形尺寸”明确为 400×400，并注明最小尺寸同为 400×400
+
+### S2 - 查找并修改 Architecture 类文档 [!]
+
+- [ ] T1 - 更新独立通知窗口默认与最小尺寸约束
+- [ ] T2 - 由 block-sync 级联同步父级文档
+
+### S3 - 查找并修改 TDD 类文档 [ ]
+
+- [ ] T1 - 更新 BrowserWindow 默认宽高参数并保留最小宽高
+- [ ] T2 - 补充 400×400 创建与缩放测试
+
+### S4 - 修改代码 [ ]
+
+- [ ] T1 - 将 notificationWindow width/height 从 600 改为 400
+- [ ] T2 - 保留 minWidth/minHeight 400，确保不小于紧凑布局下限
+
+### S5 - 验收收尾 [ ]
+
+- [ ] T1 - 运行全量 TypeScript 类型检查
+- [ ] T2 - 检查尺寸参数、相关文档与补丁完整性
+- [ ] T3 - 判断是否更新 Important_Info
+
+---
+
 ## 依赖链总览
 
 ```
@@ -366,6 +547,10 @@ M1（环境就绪）
                     ├─▶ M5（通知+设置，辅助功能）
                     └─▶ M6（功能入口，扩展功能）
                           └─▶ M9（聚合通知关闭功能）
+                                └─▶ M10（聚合通知独立窗口化）
+                                      └─▶ M11（实时工作区纵向空间回收）
+                                      └─▶ M12（通知迁移编译错误修复）
+                                      └─▶ M13（通知窗口默认尺寸 400×400）
 ```
 
-**M5 和 M6 可在 M4 完成后并行开发**（彼此无依赖）。M9 依赖 M5 完成。
+**M5 和 M6 可在 M4 完成后并行开发**（彼此无依赖）。M9 依赖 M5 完成。M10 依赖 M9（复用关闭通道）与 M4（移除项目监控审批框）。M11 依赖 M10 已移除主窗口审批面板。M12 修复 M10 独立通知窗口迁移后的编译错误。M13 将 M10 独立通知窗口的默认尺寸调整为 400×400，并保留相同最小尺寸。

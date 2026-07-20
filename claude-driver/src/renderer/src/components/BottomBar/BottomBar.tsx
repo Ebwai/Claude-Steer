@@ -1,6 +1,6 @@
-// 使用方法：<BottomBar activeTab="global" onTabChange={fn} notificationCount={n} ... />
+// 使用方法：<BottomBar activeTab="global" onTabChange={fn} ... />
 // 编译说明：renderer 进程 browser bundle
-// 代码说明：底部标签栏（38px）——三个导航标签 + 右侧统计信息 + 全局设置按钮
+// 代码说明：底部标签栏（38px）——两个导航标签 + 右侧统计信息 + 全局设置按钮
 //           样式像素级还原 global-monitor-page.html 中的 .btabs 结构
 
 import type { FC } from 'react'
@@ -11,8 +11,6 @@ import './BottomBar.css'
 interface BottomBarProps {
   activeTab: TabId
   onTabChange: (tab: TabId) => void
-  /** 消息通知未读数 */
-  notificationCount: number
   /** 本月总 token 数（全局监控 tab 显示） */
   monthlyTokens: number
   /** 当前项目 token 总消耗（项目监控 tab 显示） */
@@ -30,7 +28,6 @@ interface BottomBarProps {
 const BottomBar: FC<BottomBarProps> = ({
   activeTab,
   onTabChange,
-  notificationCount,
   monthlyTokens,
   activeProjectTokens,
   projectCount,
@@ -62,16 +59,6 @@ const BottomBar: FC<BottomBarProps> = ({
         onClick={() => onTabChange('project')}
       >
         {t('bottombar.projectMonitor')}
-      </button>
-
-      <button
-        className={`btab ${activeTab === 'notifications' ? 'btab--active' : ''}`}
-        onClick={() => onTabChange('notifications')}
-      >
-        {t('bottombar.notifications')}
-        {notificationCount > 0 && (
-          <span className="btab-badge">{notificationCount}</span>
-        )}
       </button>
 
       {/* 弹性空白 */}

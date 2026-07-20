@@ -202,10 +202,11 @@ function SoulModal({ onClose }: { onClose: () => void }): React.JSX.Element {
       setReportPath(payload.filePath)
       setInsightState('ready')
       // 向通知队列推送一条 info 消息（带 reportPath，通知页面用于渲染"打开报告"按钮）
-      store.set(notificationQueueAtom, (prev) => [
-        ...prev,
-        {
-          id: `insight-${Date.now()}`,
+      store.set(notificationQueueAtom, (prev) => {
+        const id = `insight-${payload.filePath}`
+        if (prev.some((n) => n.id === id)) return prev  // 去重（与 App.tsx 一致）
+        return [...prev, {
+          id,
           type: 'info' as const,
           title: t('globalMonitor.soul.insightReadyTitle'),
           message: t('globalMonitor.soul.insightReadyMessage'),
@@ -215,8 +216,8 @@ function SoulModal({ onClose }: { onClose: () => void }): React.JSX.Element {
           resolved: false,
           createdAt: Date.now(),
           metadata: { reportPath: payload.filePath },
-        },
-      ])
+        }]
+      })
     })
     return unlisten
   }, [setReportPath, setInsightState, store])

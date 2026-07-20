@@ -29,6 +29,34 @@ const NotificationSection: FC<Props> = ({ driverConfig, onChange }) => {
           <span className="gsm-toggle-track" />
         </label>
       </div>
+      <div className="gsm-toggle-row">
+        <div>
+          <div className="gsm-toggle-label">{t('settings.notificationSection.alwaysOnTop')}</div>
+          <div className="gsm-toggle-sub">{t('settings.notificationSection.alwaysOnTopSub')}</div>
+        </div>
+        <label className="gsm-toggle">
+          <input
+            type="checkbox"
+            checked={driverConfig.notifWindowAlwaysOnTop !== false}
+            onChange={(e) => onChange('driver', 'notifWindowAlwaysOnTop', e.target.checked)}
+          />
+          <span className="gsm-toggle-track" />
+        </label>
+      </div>
+      <div className="gsm-toggle-row">
+        <div>
+          <div className="gsm-toggle-label">{t('settings.notificationSection.autoOpen')}</div>
+          <div className="gsm-toggle-sub">{t('settings.notificationSection.autoOpenSub')}</div>
+        </div>
+        <label className="gsm-toggle">
+          <input
+            type="checkbox"
+            checked={driverConfig.notifWindowAutoOpen !== false}
+            onChange={(e) => onChange('driver', 'notifWindowAutoOpen', e.target.checked)}
+          />
+          <span className="gsm-toggle-track" />
+        </label>
+      </div>
     </div>
   )
 }

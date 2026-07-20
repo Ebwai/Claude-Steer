@@ -7,6 +7,7 @@ const en: Record<string, string> = {
   'titlebar.today': 'Today',
   'titlebar.cost': 'Cost',
   'titlebar.running': 'Running',
+  'titlebar.openNotifications': 'Open Notifications',
 
   // ── BottomBar ──
   'bottombar.globalMonitor': 'Global Monitor',
@@ -362,6 +363,10 @@ const en: Record<string, string> = {
   // ── Settings - Notification Section ──
   'settings.notificationSection.desktop': 'Desktop Notifications',
   'settings.notificationSection.desktopSub': 'Show system notification when agent requests permission',
+  'settings.notificationSection.alwaysOnTop': 'Always on Top',
+  'settings.notificationSection.alwaysOnTopSub': 'Notification window stays above other windows',
+  'settings.notificationSection.autoOpen': 'Auto-open on permission request',
+  'settings.notificationSection.autoOpenSub': 'Automatically show notification window when agent requests permission',
 
   // ── Notifications ──
   'notifications.title': 'Notifications',
@@ -371,6 +376,8 @@ const en: Record<string, string> = {
   'notifications.resolved': 'Resolved',
   'notifications.pendingRequests': 'Pending Requests',
   'notifications.systemMessages': 'System Messages',
+  'notifications.noRequests': 'No pending requests',
+  'notifications.otherRequests': 'Other requests',
   'notifications.selectHint': '← Select a request from the left',
   'notifications.requestExecution': 'Request to execute: ',
   'notifications.viewParams': 'View parameter details',

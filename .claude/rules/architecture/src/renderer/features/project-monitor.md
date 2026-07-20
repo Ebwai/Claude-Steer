@@ -17,7 +17,7 @@ graph TD
     LeftPanel --> AgentBlock
     LeftPanel --> PlanSection
     LeftPanel --> ContextPanel
-    LeftPanel --> RequestApprovalPanel
+    LeftPanel --> StatusBar
 ```
 
 ### 定位与职责
@@ -28,7 +28,7 @@ graph TD
 ### 内部组成
 
 - **ProjectMonitorPage.tsx**：页根（读 activeProjectIdAtom）。
-- **LeftPanel.tsx**：左半编排（PlanSection + AgentBlock 列表 + RequestApprovalPanel + ContextPanel + StatusBar + 启动按钮）。
+- **LeftPanel.tsx**：左半编排（PlanSection + AgentBlock 列表 + ContextPanel + StatusBar + 启动按钮）。AgentBlock 列表是上下文面板上方唯一的弹性高度区域，其底边直接衔接 ContextPanel 顶部分隔线。注意：原 RequestApprovalPanel 已迁移至独立通知窗口（见 notifications.md），本页不再包含审批面板或为其预留空间。
 - **AgentBlock.tsx**：单会话实时工作卡（状态 + 工具/经验并排 + Subagent + Insight + MessageInputBar）。
 - **ProcessTimeline.tsx**：垂直时间线（user_input 气泡 + assistant 卡 + 插入线 + Subagent mini + git 操作）。
 - **PlanSection.tsx**：折叠 Plan 树（M/S/T）。
@@ -39,17 +39,18 @@ graph TD
 ### 依赖与联动
 
 - **内部依赖**：atoms（projects/sessions/agent-block/timeline/context-panel/permission/viewport）；canvas/；capabilities（gitCapability/branchRegistry）；hooks。
-- **通信方式**：IPC.SESSION_START/INPUT/STOP/RESUME/JSONL_WATCH/GIT_*/PERMISSION_RESPOND/PROJECT_SETTINGS_*/MCP_SET_ENABLED/SKILL_SET_ENABLED/AGENT_LIST_PROJECT。
-- **关键交互场景**：实时工作区 Agent Block；历史时间线节点 Git 操作；Plan 折叠区。
+- **通信方式**：IPC.SESSION_START/INPUT/STOP/RESUME/JSONL_WATCH/GIT_*/PROJECT_SETTINGS_*/MCP_SET_ENABLED/SKILL_SET_ENABLED/AGENT_LIST_PROJECT。
+- **关键交互场景**：实时工作区 Agent Block 自适应占满 ContextPanel 上方剩余高度；历史时间线节点 Git 操作；Plan 折叠区。
 
 ### 技术选型
 
-@xyflow/react（canvas）+ 大量 React 组件；CSS flex 四层布局。
+@xyflow/react（canvas）+ 大量 React 组件；CSS column flex 三层布局，AgentBlock 列表承担唯一弹性伸缩职责，ContextPanel 与 StatusBar 固定在底部。
 
 ### 非功能约束
 
 - **性能**：SessionFrameNode ResizeObserver 框高；ProcessLineCanvas `[DIAG]` 计数器。
 - **复用**：Branch 完全复用主线工作框（AgentBlock + SessionFrameNode）。
+- **跨平台与缩放**：LeftPanel 不使用固定窗口高度或绝对定位；通过 flex 剩余空间分配适配 Windows、macOS、Ubuntu 及主窗口缩放。
 
 ## canvas
 <!-- parent: project-monitor -->
