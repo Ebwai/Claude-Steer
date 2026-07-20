@@ -104,8 +104,11 @@ function readHeadJson(relativePath, source) {
 }
 
 function isResumableVersionChange(version, worktreeStatus) {
-  const statusLines = worktreeStatus.split(/\r?\n/u).filter(Boolean)
-  const expectedLines = new Set([` M ${PACKAGE_LOCK_RELATIVE_PATH}`, ` M ${PACKAGE_RELATIVE_PATH}`])
+  const statusLines = worktreeStatus
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => line.trimStart())
+  const expectedLines = new Set([`M ${PACKAGE_LOCK_RELATIVE_PATH}`, `M ${PACKAGE_RELATIVE_PATH}`])
   if (
     statusLines.length !== expectedLines.size ||
     statusLines.some((line) => !expectedLines.has(line))
