@@ -9,6 +9,8 @@ const DRIVER_DIR = resolve(SCRIPT_DIR, '..')
 const REPO_DIR = resolve(DRIVER_DIR, '..')
 const PACKAGE_PATH = resolve(DRIVER_DIR, 'package.json')
 const PACKAGE_LOCK_PATH = resolve(DRIVER_DIR, 'package-lock.json')
+const PACKAGE_RELATIVE_PATH = 'claude-driver/package.json'
+const PACKAGE_LOCK_RELATIVE_PATH = 'claude-driver/package-lock.json'
 const SOURCE_BRANCH = 'develop'
 const TEST_REMOTE = 'origin'
 const RELEASE_REMOTE = 'release'
@@ -94,6 +96,47 @@ function refExists(args) {
   return git(args, { capture: true, acceptedExitCodes: [0, 1, 2] }).status === 0
 }
 
+function readHeadJson(relativePath, source) {
+  return parseJson(
+    git(['show', `HEAD:${relativePath}`], { capture: true }).stdout,
+    `${source}（HEAD）`
+  )
+}
+
+function isResumableVersionChange(version, worktreeStatus) {
+  const statusLines = worktreeStatus.split(/\r?\n/u).filter(Boolean)
+  const expectedLines = new Set([` M ${PACKAGE_LOCK_RELATIVE_PATH}`, ` M ${PACKAGE_RELATIVE_PATH}`])
+  if (
+    statusLines.length !== expectedLines.size ||
+    statusLines.some((line) => !expectedLines.has(line))
+  ) {
+    return false
+  }
+
+  const currentPackage = readJson(PACKAGE_PATH, 'claude-driver/package.json')
+  const currentLock = readJson(PACKAGE_LOCK_PATH, 'claude-driver/package-lock.json')
+  if (
+    currentPackage.version !== version ||
+    currentLock.version !== version ||
+    currentLock.packages?.['']?.version !== version
+  ) {
+    return false
+  }
+
+  const headPackage = readHeadJson(PACKAGE_RELATIVE_PATH, 'claude-driver/package.json')
+  const headLock = readHeadJson(PACKAGE_LOCK_RELATIVE_PATH, 'claude-driver/package-lock.json')
+  const normalizedPackage = structuredClone(currentPackage)
+  const normalizedLock = structuredClone(currentLock)
+  normalizedPackage.version = headPackage.version
+  normalizedLock.version = headLock.version
+  normalizedLock.packages[''].version = headLock.packages[''].version
+
+  return (
+    JSON.stringify(normalizedPackage) === JSON.stringify(headPackage) &&
+    JSON.stringify(normalizedLock) === JSON.stringify(headLock)
+  )
+}
+
 function precheck(version) {
   log('PRECHECK', 'START', `检查 v${version} 的发布条件`)
   assert(VERSION_PATTERN.test(version), '版本号必须是 x.y.z 格式且不能带 v 前缀，例如 1.0.1')
@@ -110,7 +153,14 @@ function precheck(version) {
   )
 
   const worktreeStatus = git(['status', '--porcelain'], { capture: true }).stdout
-  assert(!worktreeStatus, '工作区存在未提交修改，请先提交或暂存后再发布')
+  const isResume = Boolean(worktreeStatus) && isResumableVersionChange(version, worktreeStatus)
+  assert(
+    !worktreeStatus || isResume,
+    '工作区存在非本次版本更新产生的未提交修改，请先提交或暂存后再发布'
+  )
+  if (isResume) {
+    log('PRECHECK', 'INFO', `识别到上次失败后保留的 ${version} 版本修改，将从该现场安全续跑`)
+  }
 
   const remotes = new Set(git(['remote'], { capture: true }).stdout.split(/\r?\n/u).filter(Boolean))
   assert(remotes.has(TEST_REMOTE), `缺少测试仓库远程：${TEST_REMOTE}`)
@@ -129,15 +179,41 @@ function precheck(version) {
     `本地 ${SOURCE_BRANCH} 未与 ${TEST_REMOTE}/${SOURCE_BRANCH} 完全同步`
   )
 
-  const releaseBranch = `release/v${version}`
+  const remoteReleaseBranch = `release/v${version}`
+  const preferredLocalBranch = remoteReleaseBranch
+  const hasReleaseRootBranch = refExists(['show-ref', '--verify', '--quiet', 'refs/heads/release'])
+  const localReleaseBranch = hasReleaseRootBranch ? `release-v${version}` : preferredLocalBranch
   const tag = `v${version}`
+  if (hasReleaseRootBranch) {
+    log(
+      'PRECHECK',
+      'INFO',
+      `本地已存在 release 分支；本地发布分支改用 ${localReleaseBranch}，远程仍使用 ${remoteReleaseBranch}`
+    )
+  }
   assert(
-    !refExists(['show-ref', '--verify', '--quiet', `refs/heads/${releaseBranch}`]),
-    `本地分支已存在：${releaseBranch}`
+    !refExists(['show-ref', '--verify', '--quiet', `refs/heads/${localReleaseBranch}`]),
+    `本地分支已存在：${localReleaseBranch}`
+  )
+  const localDescendants = git(
+    ['for-each-ref', '--format=%(refname)', `refs/heads/${localReleaseBranch}/`],
+    { capture: true }
+  ).stdout
+  assert(!localDescendants, `本地存在与目标分支路径冲突的子分支：${localDescendants}`)
+  assert(
+    !refExists(['ls-remote', '--exit-code', '--heads', TEST_REMOTE, 'refs/heads/release']),
+    `${TEST_REMOTE} 已存在 release 分支，无法创建 ${remoteReleaseBranch}`
   )
   assert(
-    !refExists(['ls-remote', '--exit-code', '--heads', TEST_REMOTE, `refs/heads/${releaseBranch}`]),
-    `${TEST_REMOTE} 已存在分支：${releaseBranch}`
+    !refExists([
+      'ls-remote',
+      '--exit-code',
+      '--heads',
+      TEST_REMOTE,
+      `refs/heads/${remoteReleaseBranch}`,
+      `refs/heads/${remoteReleaseBranch}/*`
+    ]),
+    `${TEST_REMOTE} 已存在分支或路径冲突：${remoteReleaseBranch}`
   )
   assert(
     !refExists(['show-ref', '--verify', '--quiet', `refs/tags/${tag}`]),
@@ -163,6 +239,7 @@ function precheck(version) {
   assert(typeof packageJson.version === 'string', 'package.json 缺少 version 字段')
   assert(packageLock.packages?.[''], 'package-lock.json 缺少 packages[""] 根包信息')
   log('PRECHECK', 'DONE', '发布条件检查全部通过；下一步将执行首个写操作：更新应用版本')
+  return { localReleaseBranch, remoteReleaseBranch }
 }
 
 function updateVersion(version) {
@@ -310,21 +387,22 @@ async function main() {
     throw new ReleaseError('必须且只能传入一个版本号参数')
   }
 
-  const releaseBranch = `release/v${version}`
   const tag = `v${version}`
 
-  precheck(version)
+  const { localReleaseBranch, remoteReleaseBranch } = precheck(version)
   await step(1, `更新应用版本为 ${version}`, () => updateVersion(version))
-  await step(2, `创建发布分支 ${releaseBranch}`, () => git(['switch', '-c', releaseBranch]))
+  await step(2, `创建本地发布分支 ${localReleaseBranch}`, () =>
+    git(['switch', '-c', localReleaseBranch])
+  )
   await step(3, `提交 ${tag} 版本变更`, () => {
     git(['add', '--', 'claude-driver/package.json', 'claude-driver/package-lock.json'])
     git(['commit', '-m', `chore: release ${tag}`])
   })
-  await step(4, `推送 ${releaseBranch} 到 ${TEST_REMOTE}`, () =>
-    git(['push', '-u', TEST_REMOTE, releaseBranch])
+  await step(4, `推送到 ${TEST_REMOTE}/${remoteReleaseBranch}`, () =>
+    git(['push', '-u', TEST_REMOTE, `${localReleaseBranch}:${remoteReleaseBranch}`])
   )
-  await step(5, `推送 ${releaseBranch} 到 ${RELEASE_REMOTE}/main`, () =>
-    git(['push', RELEASE_REMOTE, `${releaseBranch}:main`])
+  await step(5, `推送 ${localReleaseBranch} 到 ${RELEASE_REMOTE}/main`, () =>
+    git(['push', RELEASE_REMOTE, `${localReleaseBranch}:main`])
   )
   await step(6, `创建注释 tag ${tag}`, () => git(['tag', '-a', tag, '-m', `Release ${tag}`]))
   await step(7, `推送 tag ${tag} 到 ${RELEASE_REMOTE}`, () => git(['push', RELEASE_REMOTE, tag]))
@@ -349,9 +427,11 @@ async function main() {
     log('STEP 10', 'INFO', `Release 地址：${published.url}`)
   })
   await step(11, `切回 ${SOURCE_BRANCH}`, () => git(['switch', SOURCE_BRANCH]))
-  await step(12, `删除本地发布分支 ${releaseBranch}`, () => git(['branch', '-d', releaseBranch]))
-  await step(13, `删除 ${TEST_REMOTE} 发布分支 ${releaseBranch}`, () =>
-    git(['push', TEST_REMOTE, '--delete', releaseBranch])
+  await step(12, `删除本地发布分支 ${localReleaseBranch}`, () =>
+    git(['branch', '-d', localReleaseBranch])
+  )
+  await step(13, `删除 ${TEST_REMOTE} 发布分支 ${remoteReleaseBranch}`, () =>
+    git(['push', TEST_REMOTE, '--delete', remoteReleaseBranch])
   )
 
   log('SUMMARY', 'DONE', `${tag} 已完成双远程推送、安装包发布与 release 分支清理`)
