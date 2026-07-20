@@ -24,7 +24,8 @@ jobs:
           - os: ubuntu-latest
             target: linux
             artifact: '*.AppImage'
-          - os: windows-latest
+          # node-gyp 目前无法识别 windows-latest 上的 Visual Studio 2026，固定到 VS 2022 镜像。
+          - os: windows-2022
             target: win
             artifact: '*-setup.exe'
 
