@@ -16,6 +16,8 @@ export const IPC = {
   NOTIFICATION: 'notification:new',
 
   // ── Renderer → Main 请求（双向 invoke，返回 Promise）────────────────────
+  /** Step 1 准备项目目录；返回 created / exists，不写模板或项目记录 */
+  PROJECT_PREPARE_DIR: 'project:prepare-dir',
   /** 创建/注册新项目 */
   PROJECT_CREATE: 'project:create',
   /** 获取已知项目列表 */

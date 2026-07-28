@@ -353,6 +353,41 @@
   flex-shrink: 0;
 }
 
+/* ── 已有目录确认 ── */
+.wiz-existing-dir-warning {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  color: var(--tx2);
+  line-height: 1.6;
+}
+
+.wiz-existing-dir-warning p {
+  margin: 0;
+}
+
+.wiz-existing-dir-warning p:first-child {
+  color: var(--or);
+  font-weight: 700;
+}
+
+.wiz-existing-dir-warning code {
+  display: block;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+  background: var(--bg3);
+  color: var(--tx3);
+  overflow-wrap: anywhere;
+}
+
+.wiz-existing-dir-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  padding-top: var(--space-sm);
+}
+
 /* ── 底部按钮 ── */
 .wiz-footer {
   display: flex;
@@ -398,6 +433,24 @@
   background: var(--bg4);
 }
 
+.wiz-btn-skip {
+  font-size: var(--text-sm);
+  padding: var(--space-sm) var(--space-xl);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--bd2);
+  background: transparent;
+  color: var(--tx3);
+  font-weight: 600;
+  transition: all 0.12s;
+}
+
+.wiz-btn-skip:hover:not(:disabled) {
+  color: var(--tx);
+  background: var(--bg3);
+}
+
 .wiz-btn-start {
   font-size: var(--text-md);
   padding: var(--space-md) var(--space-2xl);
@@ -418,6 +471,7 @@
 
 .wiz-btn-back:disabled,
 .wiz-btn-next:disabled,
+.wiz-btn-skip:disabled,
 .wiz-btn-start:disabled {
   opacity: 0.4;
   cursor: default;

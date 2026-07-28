@@ -9,6 +9,7 @@ const DRIVER_DIR = resolve(SCRIPT_DIR, '..')
 const REPO_DIR = resolve(DRIVER_DIR, '..')
 const PACKAGE_PATH = resolve(DRIVER_DIR, 'package.json')
 const PACKAGE_LOCK_PATH = resolve(DRIVER_DIR, 'package-lock.json')
+const RELEASE_GITIGNORE_PATH = resolve(REPO_DIR, '.gitignore')
 const PACKAGE_RELATIVE_PATH = 'claude-driver/package.json'
 const PACKAGE_LOCK_RELATIVE_PATH = 'claude-driver/package-lock.json'
 const SOURCE_BRANCH = 'develop'
@@ -94,6 +95,73 @@ function readJson(path, source) {
 
 function refExists(args) {
   return git(args, { capture: true, acceptedExitCodes: [0, 1, 2] }).status === 0
+}
+
+function chunk(items, size) {
+  const chunks = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+function isPublicReadme(path) {
+  const fileName = path.split('/').at(-1) ?? ''
+  return /^README(?:[._-].+)?\.md$/iu.test(fileName)
+}
+
+function shouldExcludeFromPublicRelease(path) {
+  const segments = path.split('/')
+  const directorySegments = segments.slice(0, -1)
+  const isInHiddenDirectory = directorySegments.some(
+    (segment, index) => segment.startsWith('.') && !(index === 0 && segment === '.github')
+  )
+  const isInternalDirectory = ['docs/', 'knowledge/', 'plan/', 'claude-driver/knowledge/'].some(
+    (prefix) => path.startsWith(prefix)
+  )
+  const isNonReadmeMarkdown = path.toLowerCase().endsWith('.md') && !isPublicReadme(path)
+  return isInHiddenDirectory || isInternalDirectory || isNonReadmeMarkdown
+}
+
+function preparePublicRelease(localReleaseBranch, publicReleaseBranch, version) {
+  log('STEP 5', 'INFO', `读取 ${RELEASE_REMOTE}/main 的正式仓库历史与 release 专用 .gitignore`)
+  git(['fetch', RELEASE_REMOTE, 'main'])
+  const releaseGitignore = git(['show', `${RELEASE_REMOTE}/main:.gitignore`], {
+    capture: true
+  }).stdout
+  assert(releaseGitignore, `${RELEASE_REMOTE}/main 缺少 release 专用 .gitignore`)
+
+  git(['switch', '-c', publicReleaseBranch, `${RELEASE_REMOTE}/main`])
+  // 只把源码分支的最终文件树覆盖到正式 main 之上，不把内部开发提交历史并入公开仓库。
+  git(['read-tree', '--reset', '-u', localReleaseBranch])
+
+  writeFileSync(RELEASE_GITIGNORE_PATH, `${releaseGitignore}\n`, 'utf8')
+  const trackedFiles = git(['ls-files', '-z'], { capture: true }).stdout.split('\0').filter(Boolean)
+  const exclusions = trackedFiles.filter(shouldExcludeFromPublicRelease)
+  log('STEP 5', 'INFO', `正式发布分支将停止跟踪 ${exclusions.length} 个内部文件`)
+  for (const paths of chunk(exclusions, 40)) {
+    git(['rm', '--cached', '--ignore-unmatch', '--', ...paths])
+  }
+  git(['add', '--', '.gitignore'])
+  git(['commit', '-m', `chore: prepare public v${version} repository`])
+
+  const remainingMarkdown = git(['ls-files', '*.md'], { capture: true })
+    .stdout.split(/\r?\n/u)
+    .filter(Boolean)
+  assert(
+    remainingMarkdown.every(isPublicReadme),
+    `正式发布分支仍包含非 README 文档：${remainingMarkdown.join(', ')}`
+  )
+  const hiddenFiles = git(['ls-files'], { capture: true })
+    .stdout.split(/\r?\n/u)
+    .filter(Boolean)
+    .filter((path) => {
+      const segments = path.split('/').slice(0, -1)
+      return segments.some(
+        (segment, index) => segment.startsWith('.') && !(index === 0 && segment === '.github')
+      )
+    })
+  assert(hiddenFiles.length === 0, `正式发布分支仍包含隐藏开发目录文件：${hiddenFiles.join(', ')}`)
 }
 
 function readHeadJson(relativePath, source) {
@@ -186,6 +254,7 @@ function precheck(version) {
   const preferredLocalBranch = remoteReleaseBranch
   const hasReleaseRootBranch = refExists(['show-ref', '--verify', '--quiet', 'refs/heads/release'])
   const localReleaseBranch = hasReleaseRootBranch ? `release-v${version}` : preferredLocalBranch
+  const publicReleaseBranch = `public-v${version}`
   const tag = `v${version}`
   if (hasReleaseRootBranch) {
     log(
@@ -203,6 +272,10 @@ function precheck(version) {
     { capture: true }
   ).stdout
   assert(!localDescendants, `本地存在与目标分支路径冲突的子分支：${localDescendants}`)
+  assert(
+    !refExists(['show-ref', '--verify', '--quiet', `refs/heads/${publicReleaseBranch}`]),
+    `本地正式发布临时分支已存在：${publicReleaseBranch}`
+  )
   assert(
     !refExists(['ls-remote', '--exit-code', '--heads', TEST_REMOTE, 'refs/heads/release']),
     `${TEST_REMOTE} 已存在 release 分支，无法创建 ${remoteReleaseBranch}`
@@ -226,6 +299,10 @@ function precheck(version) {
     !refExists(['ls-remote', '--exit-code', '--tags', RELEASE_REMOTE, `refs/tags/${tag}`]),
     `${RELEASE_REMOTE} 已存在 tag：${tag}`
   )
+  assert(
+    refExists(['ls-remote', '--exit-code', '--heads', RELEASE_REMOTE, 'refs/heads/main']),
+    `${RELEASE_REMOTE}/main 不存在`
+  )
 
   const existingRelease = gh(['api', `repos/${RELEASE_REPOSITORY}/releases/tags/${tag}`], {
     capture: true,
@@ -242,7 +319,7 @@ function precheck(version) {
   assert(typeof packageJson.version === 'string', 'package.json 缺少 version 字段')
   assert(packageLock.packages?.[''], 'package-lock.json 缺少 packages[""] 根包信息')
   log('PRECHECK', 'DONE', '发布条件检查全部通过；下一步将执行首个写操作：更新应用版本')
-  return { localReleaseBranch, remoteReleaseBranch }
+  return { localReleaseBranch, remoteReleaseBranch, publicReleaseBranch }
 }
 
 function updateVersion(version) {
@@ -298,10 +375,10 @@ function sleep(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds))
 }
 
-async function findTagWorkflowRun(tag, commitSha) {
+async function findTagWorkflowRun(stepScope, tag, commitSha) {
   for (let attempt = 1; attempt <= WORKFLOW_POLL_ATTEMPTS; attempt += 1) {
     log(
-      'STEP 9',
+      stepScope,
       'INFO',
       `查找 ${tag} 对应的 GitHub Actions（${attempt}/${WORKFLOW_POLL_ATTEMPTS}）`
     )
@@ -330,7 +407,7 @@ async function findTagWorkflowRun(tag, commitSha) {
   throw new ReleaseError(`等待 ${tag} 对应的 ${WORKFLOW_FILE} 超时`)
 }
 
-function ensureDraftRelease(tag) {
+function ensureDraftRelease(stepScope, tag) {
   const creation = gh(
     [
       'release',
@@ -348,13 +425,13 @@ function ensureDraftRelease(tag) {
   )
   if (creation.status === 0) return
 
-  log('STEP 8', 'INFO', '自动构建可能已先创建 Release，正在核验现有 Release')
+  log(stepScope, 'INFO', '自动构建可能已先创建 Release，正在核验现有 Release')
   gh(['release', 'view', tag, '--repo', RELEASE_REPOSITORY, '--json', 'tagName,isDraft'], {
     capture: true
   })
 }
 
-function verifyReleaseAssets(tag) {
+function verifyReleaseAssets(stepScope, tag) {
   const response = gh(
     ['release', 'view', tag, '--repo', RELEASE_REPOSITORY, '--json', 'url,isDraft,assets'],
     { capture: true }
@@ -369,7 +446,7 @@ function verifyReleaseAssets(tag) {
     assetNames.some((name) => name.endsWith('.AppImage')),
     'Release 缺少 Linux 安装包（*.AppImage）'
   )
-  log('STEP 10', 'INFO', `已核验 Release 安装包：${assetNames.join(', ')}`)
+  log(stepScope, 'INFO', `已核验 Release 安装包：${assetNames.join(', ')}`)
 }
 
 function printUsage() {
@@ -392,7 +469,7 @@ async function main() {
 
   const tag = `v${version}`
 
-  const { localReleaseBranch, remoteReleaseBranch } = precheck(version)
+  const { localReleaseBranch, remoteReleaseBranch, publicReleaseBranch } = precheck(version)
   await step(1, `更新应用版本为 ${version}`, () => updateVersion(version))
   await step(2, `创建本地发布分支 ${localReleaseBranch}`, () =>
     git(['switch', '-c', localReleaseBranch])
@@ -404,21 +481,24 @@ async function main() {
   await step(4, `推送到 ${TEST_REMOTE}/${remoteReleaseBranch}`, () =>
     git(['push', '-u', TEST_REMOTE, `${localReleaseBranch}:${remoteReleaseBranch}`])
   )
-  await step(5, `推送 ${localReleaseBranch} 到 ${RELEASE_REMOTE}/main`, () =>
-    git(['push', RELEASE_REMOTE, `${localReleaseBranch}:main`])
+  await step(5, `准备正式仓库分支 ${publicReleaseBranch}`, () =>
+    preparePublicRelease(localReleaseBranch, publicReleaseBranch, version)
   )
-  await step(6, `创建注释 tag ${tag}`, () => git(['tag', '-a', tag, '-m', `Release ${tag}`]))
-  await step(7, `推送 tag ${tag} 到 ${RELEASE_REMOTE}`, () => git(['push', RELEASE_REMOTE, tag]))
-  await step(8, `创建或确认 ${tag} 的草稿 Release`, () => ensureDraftRelease(tag))
+  await step(6, `推送 ${publicReleaseBranch} 到 ${RELEASE_REMOTE}/main`, () =>
+    git(['push', RELEASE_REMOTE, `${publicReleaseBranch}:main`])
+  )
+  await step(7, `创建注释 tag ${tag}`, () => git(['tag', '-a', tag, '-m', `Release ${tag}`]))
+  await step(8, `推送 tag ${tag} 到 ${RELEASE_REMOTE}`, () => git(['push', RELEASE_REMOTE, tag]))
+  await step(9, `创建或确认 ${tag} 的草稿 Release`, () => ensureDraftRelease('STEP 9', tag))
 
   const commitSha = git(['rev-parse', 'HEAD'], { capture: true }).stdout
-  await step(9, `等待 ${tag} 自动构建完成`, async () => {
-    const run = await findTagWorkflowRun(tag, commitSha)
-    log('STEP 9', 'INFO', `已找到 Actions Run：${run.html_url}`)
+  await step(10, `等待 ${tag} 自动构建完成`, async () => {
+    const run = await findTagWorkflowRun('STEP 10', tag, commitSha)
+    log('STEP 10', 'INFO', `已找到 Actions Run：${run.html_url}`)
     gh(['run', 'watch', String(run.id), '--repo', RELEASE_REPOSITORY, '--exit-status'])
   })
-  await step(10, `核验安装包并发布 ${tag} Release`, () => {
-    verifyReleaseAssets(tag)
+  await step(11, `核验安装包并发布 ${tag} Release`, () => {
+    verifyReleaseAssets('STEP 11', tag)
     gh(['release', 'edit', tag, '--repo', RELEASE_REPOSITORY, '--draft=false', '--latest'])
     const published = parseJson(
       gh(['release', 'view', tag, '--repo', RELEASE_REPOSITORY, '--json', 'url,isDraft'], {
@@ -427,17 +507,20 @@ async function main() {
       'GitHub Release 发布结果'
     )
     assert(published.isDraft === false, `${tag} Release 仍处于草稿状态`)
-    log('STEP 10', 'INFO', `Release 地址：${published.url}`)
+    log('STEP 11', 'INFO', `Release 地址：${published.url}`)
   })
-  await step(11, `切回 ${SOURCE_BRANCH}`, () => git(['switch', SOURCE_BRANCH]))
-  await step(12, `删除本地发布分支 ${localReleaseBranch}`, () =>
+  await step(12, `切回 ${SOURCE_BRANCH}`, () => git(['switch', SOURCE_BRANCH]))
+  await step(13, `删除本地正式发布临时分支 ${publicReleaseBranch}`, () =>
+    git(['branch', '-D', publicReleaseBranch])
+  )
+  await step(14, `删除本地发布分支 ${localReleaseBranch}`, () =>
     git(['branch', '-d', localReleaseBranch])
   )
-  await step(13, `删除 ${TEST_REMOTE} 发布分支 ${remoteReleaseBranch}`, () =>
+  await step(15, `删除 ${TEST_REMOTE} 发布分支 ${remoteReleaseBranch}`, () =>
     git(['push', TEST_REMOTE, '--delete', remoteReleaseBranch])
   )
 
-  log('SUMMARY', 'DONE', `${tag} 已完成双远程推送、安装包发布与 release 分支清理`)
+  log('SUMMARY', 'DONE', `${tag} 已完成正式仓库过滤、双远程推送、安装包发布与分支清理`)
 }
 
 main().catch((error) => {

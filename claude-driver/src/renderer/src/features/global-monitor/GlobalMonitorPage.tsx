@@ -18,15 +18,20 @@ interface GlobalMonitorPageProps {
 function GlobalMonitorPage({ onNavigateToProject }: GlobalMonitorPageProps): React.JSX.Element {
   const [wizardOpen, setWizardOpen] = useState(false)
 
-  const handleOpenWizard  = useCallback(() => setWizardOpen(true), [])
+  const handleOpenWizard = useCallback(() => setWizardOpen(true), [])
   const handleCloseWizard = useCallback(() => setWizardOpen(false), [])
+  const handleProjectComplete = useCallback((projectId: string) => {
+    console.log(`[GlobalMonitorPage] Project wizard complete; navigating: projectId=${projectId}`)
+    setWizardOpen(false)
+    onNavigateToProject?.(projectId)
+  }, [onNavigateToProject])
 
   return (
     <div className="gm-page">
       <LanguageSwitcher />
       <CanvasPanel onCreateProject={handleOpenWizard} onNavigateToProject={onNavigateToProject} />
       {wizardOpen
-        ? <CreateProjectWizard onClose={handleCloseWizard} />
+        ? <CreateProjectWizard onClose={handleCloseWizard} onComplete={handleProjectComplete} />
         : <RightPanel />
       }
     </div>

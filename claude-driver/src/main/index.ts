@@ -31,7 +31,9 @@ import {
   getLastRootDir,
 } from './lib/projects/ProjectStore'
 import { scanForProjects } from './lib/projects/ProjectScanner'
+import { prepareProjectDirectory } from './lib/projects/ProjectDirectory'
 import { PtyManager } from './lib/pty/PtyManager'
+import { createTrustGate, type TrustGate } from './lib/pty/TrustGate'
 import { JsonlWatcher } from './lib/jsonl/JsonlWatcher'
 import { GitManager } from './lib/git/GitManager'
 import { checkAllDependencies, autoInstallClaude } from './lib/deps/DependencyChecker'
@@ -46,7 +48,6 @@ import {
   readProjectMcpJsonServers,
   readProjectMcpState,
   patchProjectMcpState,
-  ensureProjectTrusted,
   ensureOnboardingCompleted,
 } from './lib/config/ClaudeJsonManager'
 import {
@@ -170,30 +171,38 @@ const termWindows = new Map<string, BrowserWindow>()
 // ── PtyManager 全局实例（跨 session 共享）──────────────────────────────────
 const ptyManager = new PtyManager()
 
-// ── trust folder 对话框自动确认 ──────────────────────────────────────────────
-// 裸启 claude 进入未信任目录时，Claude TUI 会弹 "Do you trust the files in this folder?"
-// 选择框（默认光标聚焦 Yes）。insight/chat 等自动流程无人工干预会被卡住，故在 onData
-// 中统一检测文本并发送回车确认 Yes。配合启动前的 ensureProjectTrusted() 双保险。
-//
-// 关键词尽量宽泛：Claude Code 不同版本/语言下对话框文案可能变化，只要命中任一关键词
-// 即判定为 trust 对话框。trustHandledPtyIds 保证每个 session 只处理一次，
-// 误命中代价仅为多发一个回车（trust 对话框总是启动时最先出现，时序上不会被后续输出抢占）。
-// 同时匹配正常空格和压缩文本（终端可能压缩空格：Isthisaprojectyoucreatedoroneyoutrust?）
-const TRUST_DIALOG_RE = /trust(?:the|these|this)?\s*(?:files|folder|directory|project)|do\s*you\s*trust|i\s*trust\s*this|trust\s*folder/i
+// ── 应用托管 Session 的启动期信任门 ──────────────────────────────────────────
+const trustGatesByPtyId = new Map<string, TrustGate>()
 
-const trustHandledPtyIds = new Set<string>()
+function createManagedTrustGate(sessionId: string, projectPath: string): TrustGate {
+  const previous = trustGatesByPtyId.get(sessionId)
+  if (previous) previous.dispose('replaced')
 
-/** 检测 trust folder 对话框并自动回车确认 Yes；返回是否处理了本次对话框 */
-function handleTrustFolderPrompt(sessionId: string, data: string): boolean {
-  if (trustHandledPtyIds.has(sessionId)) return false
-  const plain = stripAnsi(data)
-  if (TRUST_DIALOG_RE.test(plain)) {
-    trustHandledPtyIds.add(sessionId)
-    console.log(`[trust] dialog detected in session ${sessionId}, sending Enter to confirm Yes`)
-    ptyManager.rawWrite(sessionId, '\r')
-    return true
-  }
-  return false
+  const gate = createTrustGate({
+    sessionId,
+    projectPath,
+    confirmTrust: (input) => ptyManager.rawWrite(sessionId, input),
+  })
+  trustGatesByPtyId.set(sessionId, gate)
+  return gate
+}
+
+function inspectTrustGate(sessionId: string, data: string): boolean {
+  return trustGatesByPtyId.get(sessionId)?.inspect(data) ?? false
+}
+
+function markTrustGateReady(sessionId: string, reason: string): void {
+  const gate = trustGatesByPtyId.get(sessionId)
+  if (!gate) return
+  gate.markReady(reason)
+  trustGatesByPtyId.delete(sessionId)
+}
+
+function disposeTrustGate(sessionId: string, reason: string): void {
+  const gate = trustGatesByPtyId.get(sessionId)
+  if (!gate) return
+  gate.dispose(reason)
+  trustGatesByPtyId.delete(sessionId)
 }
 
 // ── insight 临时 PTY 守卫集合 ─────────────────────────────────────────────────
@@ -244,6 +253,7 @@ function bindPtyToClaudeSession(ptyId: string, claudeId: string, transcriptPath:
   ptyToClaudeMap.set(ptyId, claudeId)
   claudeToPtyMap.set(claudeId, ptyId)
   sessionCwdMap.set(claudeId, { ptyId, cwd })
+  markTrustGateReady(ptyId, 'claude-session-bound')
   const bindPayload = { ptyId, claudeId, transcriptPath, cwd }
   mainWindow?.webContents.send(IPC.PTY_BIND, bindPayload)
   if (notificationWindow && !notificationWindow.isDestroyed()) {
@@ -740,6 +750,18 @@ function registerIpcHandlers(): void {
     return readProjects()
   })
 
+  ipcMain.handle(IPC.PROJECT_PREPARE_DIR, async (_event, payload: { path: string }) => {
+    try {
+      console.log(`[ipc] project:prepare-dir begin → ${payload.path}`)
+      const result = prepareProjectDirectory(payload.path)
+      console.log(`[ipc] project:prepare-dir ${result.status} → ${payload.path}`)
+      return { ok: true, status: result.status }
+    } catch (err) {
+      console.error(`[ipc] project:prepare-dir failed → ${payload.path}:`, err)
+      return { ok: false, error: String(err) }
+    }
+  })
+
   ipcMain.handle(IPC.PROJECT_CREATE, async (
     _event,
     payload: { name: string; path: string; description?: string }
@@ -874,13 +896,12 @@ function registerIpcHandlers(): void {
       model?: string
     }
   ) => {
+    const sessionId = payload.sessionId ?? randomUUID()
     try {
       const logWinState = (globalThis as Record<string, unknown>).__logMainWinState as ((tag: string) => void) | undefined
       logWinState?.('SESSION_START_begin')
-      const sessionId = payload.sessionId ?? randomUUID()
       const sessionStartTime = Date.now()
-      // 自动信任目标目录，避免 Claude CLI 的信任对话框阻塞 PTY session
-      ensureProjectTrusted(payload.projectPath)
+      createManagedTrustGate(sessionId, payload.projectPath)
       logWinState?.('SESSION_START_afterTrust')
       // 调试：记录启动参数和环境
       console.log(`[DEBUG:SESSION_START] projectId=${payload.projectId} projectPath=${payload.projectPath} permissionMode=${payload.permissionMode}`)
@@ -894,6 +915,7 @@ function registerIpcHandlers(): void {
         onData: (sid, data) => {
           // 调试：捕获 PTY 原始输出
           console.log(`[DEBUG:PTY_RAW] session=${sid} data=${JSON.stringify(data.slice(0, 300))}`)
+          inspectTrustGate(sid, data)
           sendToRenderers(IPC.SESSION_STATUS, { sessionId: sid, data })
           termWindows.get(sid)?.webContents.send(IPC.TERM_DATA, data)
           // /branch 成功时 stdout 输出 "Branched─conversation"（─ = U+2500 制表线）
@@ -905,6 +927,7 @@ function registerIpcHandlers(): void {
         },
         onExit: (sid, exitCode) => {
           console.log(`[PtyManager] Session ${sid} exited with code ${exitCode}`)
+          disposeTrustGate(sid, `session-exit:${exitCode}`)
           console.log(`[DEBUG:PTY_EXIT] session=${sid} exitCode=${exitCode} time=${Date.now()}`)
           sendToRenderers(IPC.SESSION_STATUS, {
             sessionId: sid,
@@ -962,6 +985,7 @@ function registerIpcHandlers(): void {
       console.log(`[ipc] session:start OK → ${sessionId}`)
       return { ok: true, sessionId }
     } catch (err) {
+      disposeTrustGate(sessionId, 'session-start-failed')
       console.error('[ipc] session:start failed:', err)
       return { ok: false, error: String(err) }
     }
@@ -974,35 +998,52 @@ function registerIpcHandlers(): void {
     try {
       // 若 sessionId 是 Claude Code UUID（branch session），通过绑定表反查真实 PTY UUID
       const ptyId = claudeToPtyMap.get(payload.sessionId) ?? payload.sessionId
-      // raw=true：xterm 交互模式，每次按键原样发到 PTY，由 line discipline 处理行缓冲
-      // raw=false（默认）：程序注入整句指令，自动追加 \r 触发执行
+      const executeInput = (): void => {
+        // raw=true：xterm 交互模式，每次按键原样发到 PTY，由 line discipline 处理行缓冲
+        // raw=false（默认）：程序注入整句指令，自动追加 \r 触发执行
+        if (payload.raw) {
+          ptyManager.rawWrite(ptyId, payload.text)
+        } else {
+          ptyManager.writeToSession(ptyId, payload.text)
+        }
+        // 精确匹配 "/branch"（去除首尾空白后完全等于 /branch）
+        if (payload.text.trim() === '/branch') {
+          console.log(`[Branch] /branch detected on session ${payload.sessionId} → ptyId=${ptyId}`)
+          // key 统一用真实 ptyId（hook server 用 ptyIdBeforeUnbind 查，必须与此一致）
+          pendingBranchByPtySession.set(ptyId, Date.now())
+          // parentClaudeId：从 ptyId 反查（ptyId 绑定到当前运行的 claudeId）
+          const parentClaudeIdForBranch = ptyToClaudeMap.get(ptyId)
+          // SESSION_BRANCH_LINK 预通知：sessionId 用 ptyId（渲染层 branchHandler 期望的 parentPtyId）
+          mainWindow?.webContents.send(IPC.SESSION_BRANCH_LINK, {
+            sessionId: ptyId,
+            parentClaudeId: parentClaudeIdForBranch,
+            timestamp: Date.now(),
+          })
+          // 3s 后连发 2×Ctrl+C，强制 branch session 退出以触发 SessionEnd hook
+          setTimeout(() => {
+            if (pendingBranchByPtySession.has(ptyId)) {
+              console.log(`[Branch] Sending 2×Ctrl+C to force branch session exit (ptyId=${ptyId})`)
+              ptyManager.rawWrite(ptyId, '\x03')
+              setTimeout(() => ptyManager.rawWrite(ptyId, '\x03'), 200)
+            }
+          }, 3000)
+        }
+      }
+
       if (payload.raw) {
-        ptyManager.rawWrite(ptyId, payload.text)
-      } else {
-        ptyManager.writeToSession(ptyId, payload.text)
+        // 用户正在直接操作终端时立即交出控制权，避免自动确认与手动按键竞争。
+        markTrustGateReady(ptyId, 'first-terminal-input')
+        executeInput()
+        return { ok: true }
       }
-      // 精确匹配 "/branch"（去除首尾空白后完全等于 /branch）
-      if (payload.text.trim() === '/branch') {
-        console.log(`[Branch] /branch detected on session ${payload.sessionId} → ptyId=${ptyId}`)
-        // key 统一用真实 ptyId（hook server 用 ptyIdBeforeUnbind 查，必须与此一致）
-        pendingBranchByPtySession.set(ptyId, Date.now())
-        // parentClaudeId：从 ptyId 反查（ptyId 绑定到当前运行的 claudeId）
-        const parentClaudeIdForBranch = ptyToClaudeMap.get(ptyId)
-        // SESSION_BRANCH_LINK 预通知：sessionId 用 ptyId（渲染层 branchHandler 期望的 parentPtyId）
-        mainWindow?.webContents.send(IPC.SESSION_BRANCH_LINK, {
-          sessionId: ptyId,
-          parentClaudeId: parentClaudeIdForBranch,
-          timestamp: Date.now(),
-        })
-        // 3s 后连发 2×Ctrl+C，强制 branch session 退出以触发 SessionEnd hook
-        setTimeout(() => {
-          if (pendingBranchByPtySession.has(ptyId)) {
-            console.log(`[Branch] Sending 2×Ctrl+C to force branch session exit (ptyId=${ptyId})`)
-            ptyManager.rawWrite(ptyId, '\x03')
-            setTimeout(() => ptyManager.rawWrite(ptyId, '\x03'), 200)
-          }
-        }, 3000)
+
+      const trustGate = trustGatesByPtyId.get(ptyId)
+      if (trustGate?.deferUntilReady(executeInput, 'programmatic-session-input')) {
+        console.log(`[ipc] session:input deferred until trusted startup is ready: session=${payload.sessionId} ptyId=${ptyId}`)
+        return { ok: true, deferred: true }
       }
+
+      executeInput()
       return { ok: true }
     } catch (err) {
       console.error('[ipc] session:input failed:', err)
@@ -1032,12 +1073,12 @@ function registerIpcHandlers(): void {
     _event,
     payload: { projectId: string; projectPath: string; resumeSessionId: string; permissionMode: PermissionMode }
   ) => {
+    const sessionId = randomUUID()
     try {
       const logWinState = (globalThis as Record<string, unknown>).__logMainWinState as ((tag: string) => void) | undefined
       logWinState?.('SESSION_RESUME_begin')
-      const sessionId = randomUUID()
       const sessionStartTime = Date.now()
-      ensureProjectTrusted(payload.projectPath)
+      createManagedTrustGate(sessionId, payload.projectPath)
       logWinState?.('SESSION_RESUME_afterTrust')
       ptyManager.resumeSession({
         sessionId,
@@ -1045,11 +1086,13 @@ function registerIpcHandlers(): void {
         permissionMode: payload.permissionMode,
         resumeSessionId: payload.resumeSessionId,
         onData: (sid, data) => {
+          inspectTrustGate(sid, data)
           sendToRenderers(IPC.SESSION_STATUS, { sessionId: sid, data })
           termWindows.get(sid)?.webContents.send(IPC.TERM_DATA, data)
         },
         onExit: (sid, exitCode) => {
           console.log(`[PtyManager] Session ${sid} exited with code ${exitCode}`)
+          disposeTrustGate(sid, `session-resume-exit:${exitCode}`)
           sendToRenderers(IPC.SESSION_STATUS, { sessionId: sid, status: 'Completed' })
           // PTY 退出时直接向渲染进程发 PTY_UNBIND（同上，避免 claudeToPtyMap lookup 失败）
           const claudeId = ptyToClaudeMap.get(sid) ?? sid
@@ -1066,6 +1109,7 @@ function registerIpcHandlers(): void {
       console.log(`[ipc] session:resume OK → ${sessionId}`)
       return { ok: true, sessionId }
     } catch (err) {
+      disposeTrustGate(sessionId, 'session-resume-failed')
       console.error('[ipc] session:resume failed:', err)
       return { ok: false, error: String(err) }
     }
@@ -2294,8 +2338,7 @@ function registerIpcHandlers(): void {
     const insightId = `insight-${randomUUID()}`
     const homeDir = os.homedir()
 
-    // 预信任 home 目录，跳过 Claude trust folder 对话框（与正常 session 启动一致）
-    ensureProjectTrusted(homeDir)
+    createManagedTrustGate(insightId, homeDir)
 
     console.log(`[insight] starting temporary PTY (id=${insightId}) in ${homeDir}`)
     insightPtyIds.add(insightId)
@@ -2308,6 +2351,7 @@ function registerIpcHandlers(): void {
     const sendInsightsCommand = (): void => {
       if (commandSent) return
       commandSent = true
+      markTrustGateReady(insightId, 'insight-command-send')
       console.log('[insight] sending /insights command')
       ptyManager.rawWrite(insightId, '/insights\r')
     }
@@ -2342,8 +2386,8 @@ function registerIpcHandlers(): void {
           permissionMode: 'default',
           onData: (_id, data) => {
             const plain = stripAnsi(data)
-            // 优先处理 trust folder 对话框（兜底：应对预信任失败/新机器/并发竞争）
-            if (handleTrustFolderPrompt(insightId, data)) return
+            // 优先处理受控启动阶段的 trust folder 对话框兜底
+            if (inspectTrustGate(insightId, data)) return
             if (!commandSent) return  // /insights 未发送，跳过后续检测
             // 累积输出文本（保留最近 2KB 防止内存膨胀）
             outputBuffer += plain
@@ -2362,7 +2406,7 @@ function registerIpcHandlers(): void {
           onExit: (_id, code) => {
             console.log(`[insight] temporary PTY exited (code=${code})`)
             insightPtyIds.delete(insightId)
-            trustHandledPtyIds.delete(insightId)
+            disposeTrustGate(insightId, `insight-exit:${code}`)
             // 进程退出时兜底：若已完成但未触发通知，从输出中提取路径
             if (!completed) handleCompletion()
           },
@@ -2386,14 +2430,14 @@ function registerIpcHandlers(): void {
           console.warn('[insight] 2min timeout, force stopping insight PTY')
           ptyManager.stopSession(insightId)
           insightPtyIds.delete(insightId)
-          trustHandledPtyIds.delete(insightId)
+          disposeTrustGate(insightId, 'insight-timeout')
         }
       }, 120_000)
 
       return { ok: true }
     } catch (err) {
       insightPtyIds.delete(insightId)
-      trustHandledPtyIds.delete(insightId)
+      disposeTrustGate(insightId, 'insight-start-failed')
       console.error('[insight] failed to start insight PTY:', err)
       return { ok: false, error: String(err) }
     }
@@ -2405,8 +2449,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.CHAT_START, async () => {
     const chatId = `chat-${randomUUID()}`
     const homeDir = os.homedir()
-    // 预信任 home 目录，跳过 Claude trust folder 对话框（与正常 session 启动一致）
-    ensureProjectTrusted(homeDir)
+    createManagedTrustGate(chatId, homeDir)
     chatPtyIds.add(chatId)
     console.log(`[chat] starting PTY (id=${chatId}) in ${homeDir}`)
 
@@ -2417,14 +2460,14 @@ function registerIpcHandlers(): void {
           projectPath: homeDir,
           permissionMode: 'default',
           onData: (_id, raw) => {
-            // 优先处理 trust folder 对话框（兜底），其余原始输出转发到 chat 终端窗口
-            handleTrustFolderPrompt(chatId, raw)
+            // 受控启动阶段检查 trust folder 对话框；原始输出仍转发到 chat 窗口
+            inspectTrustGate(chatId, raw)
             chatWindows.get(chatId)?.webContents.send(IPC.TERM_DATA, raw)
           },
           onExit: (sid, code) => {
             console.log(`[chat] PTY exited (id=${sid} code=${code})`)
             chatPtyIds.delete(sid)
-            trustHandledPtyIds.delete(sid)
+            disposeTrustGate(sid, `chat-exit:${code}`)
             chatWindows.get(sid)?.webContents.send(IPC.TERM_DATA, '\r\n[对话已结束]\r\n')
           },
         },
@@ -2433,7 +2476,7 @@ function registerIpcHandlers(): void {
       return { ok: true, sessionId: chatId }
     } catch (err) {
       chatPtyIds.delete(chatId)
-      trustHandledPtyIds.delete(chatId)
+      disposeTrustGate(chatId, 'chat-start-failed')
       console.error('[chat] startBare failed:', err)
       return { ok: false, error: String(err) }
     }

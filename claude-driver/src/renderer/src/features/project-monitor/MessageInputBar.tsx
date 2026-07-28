@@ -32,7 +32,7 @@ function MessageInputBar({ sessionId, isRunning, agentLabel, agentColor, onSent 
     try {
       await window.api.invoke(IPC.SESSION_INPUT, {
         sessionId,
-        text: text.trim() + '\n',
+        text: text.trim(),
       })
       setText('')
       textareaRef.current?.focus()

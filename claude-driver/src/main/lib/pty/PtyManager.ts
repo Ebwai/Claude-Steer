@@ -167,8 +167,13 @@ function permissionModeToArgs(mode: PermissionMode): string[] {
   }
 }
 
+// Claude TUI 对同一次 PTY write 中紧随文本的 Enter 可能只渲染文本而不提交。
+// 50ms 与已实测可用的权限 TUI 分键间隔保持一致。
+const PROGRAMMATIC_ENTER_DELAY_MS = 50
+
 export class PtyManager {
   private sessions = new Map<string, PtyInstance>()
+  private lineWriteQueues = new Map<string, Promise<void>>()
 
   /**
    * 启动新的 Claude PTY session
@@ -359,20 +364,49 @@ export class PtyManager {
   }
 
   /**
-   * 向 session stdin 写入文本
-   * @param text 消息内容（行尾使用 \r，PTY 标准）
+   * 向 session stdin 串行写入一行程序化输入。
+   * 文本与 Enter 分为两次 PTY write，并使用已实测的 50ms TUI 按键间隔。
+   * @param text 消息内容；末尾已有的 \r 会被拆出并作为独立 Enter 发送
    */
   writeToSession(sessionId: string, text: string): void {
-    const instance = this.sessions.get(sessionId)
-    if (!instance) {
-      console.warn(`[PtyManager] writeToSession: session ${sessionId} not found`)
-      return
-    }
-    // PTY stdin 行尾必须是 \r（回车），\n 在某些终端环境下不触发执行
-    const normalized = text.endsWith('\r') ? text : text + '\r'
-    instance.pty.write(normalized)
-    instance.lastActivityAt = Date.now()
-    this.resetTimeoutTimer(instance, { sessionId, onExit: () => {} })
+    const previousWrite = this.lineWriteQueues.get(sessionId) ?? Promise.resolve()
+    const writeTask = previousWrite.then(async () => {
+      const instance = this.sessions.get(sessionId)
+      if (!instance) {
+        console.warn(`[PtyManager] writeToSession: session ${sessionId} not found`)
+        return
+      }
+
+      const content = text.endsWith('\r') ? text.slice(0, -1) : text
+      instance.pty.write(content)
+      instance.lastActivityAt = Date.now()
+      console.log(
+        `[PtyManager] writeToSession: text written, Enter scheduled in ${PROGRAMMATIC_ENTER_DELAY_MS}ms session=${sessionId}`,
+      )
+
+      await new Promise<void>((resolve) => setTimeout(resolve, PROGRAMMATIC_ENTER_DELAY_MS))
+      const currentInstance = this.sessions.get(sessionId)
+      if (currentInstance !== instance) {
+        console.warn(
+          `[PtyManager] writeToSession: Enter skipped because session changed or exited session=${sessionId}`,
+        )
+        return
+      }
+
+      currentInstance.pty.write('\r')
+      currentInstance.lastActivityAt = Date.now()
+      this.resetTimeoutTimer(currentInstance, { sessionId, onExit: () => {} })
+      console.log(`[PtyManager] writeToSession: Enter sent session=${sessionId}`)
+    }).catch((error) => {
+      console.error(`[PtyManager] writeToSession failed: session=${sessionId}`, error)
+    })
+
+    this.lineWriteQueues.set(sessionId, writeTask)
+    void writeTask.finally(() => {
+      if (this.lineWriteQueues.get(sessionId) === writeTask) {
+        this.lineWriteQueues.delete(sessionId)
+      }
+    })
   }
 
   /**
