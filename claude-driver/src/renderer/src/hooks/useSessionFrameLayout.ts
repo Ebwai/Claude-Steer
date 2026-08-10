@@ -38,28 +38,17 @@ export interface FrameLayout {
   width: number
 }
 
-// ── Cluster 内部结构 ──────────────────────────────────────────────────────────
-
-interface BranchChild {
-  id: string
-  rel: SessionRelation
+interface ClusterGeometry {
+  rootId: string
+  memberIds: string[]
+  relativeX: Map<string, number>
+  left: number
+  right: number
 }
 
-interface Cluster {
-  parentId: string
-  leftChildren: BranchChild[]
-  rightChildren: BranchChild[]
-}
+// ── 纯布局计算 + React Hook 包装 ───────────────────────────────────────────────
 
-/** 计算单侧 branch 子框组的最大占用宽度 */
-function sideWidth(children: BranchChild[]): number {
-  if (children.length === 0) return 0
-  return Math.max(...children.map((c) => (c.rel.lineLength ?? FRAME_GAP_X) + FRAME_WIDTH))
-}
-
-// ── 主 Hook ────────────────────────────────────────────────────────────────────
-
-export function useSessionFrameLayout(
+export function computeSessionFrameLayout(
   sessionIds: string[],
   heights: Map<string, number>,
   relations: RelationsMap,
@@ -68,7 +57,7 @@ export function useSessionFrameLayout(
   /** 各 session 的 startedAt 时间戳，用于 Y 轴时间堆叠排序 */
   startTimes?: Map<string, number>
 ): FrameLayout[] {
-  return useMemo(() => {
+    void nodeYOffsets
     const count = sessionIds.length
     if (count === 0) return []
 
@@ -77,151 +66,149 @@ export function useSessionFrameLayout(
       return [{ sessionId: sessionIds[0], x: 0, y: FRAME_GAP_Y, width: FRAME_WIDTH }]
     }
 
-    // 找出所有 branch 子框
-    const branchChildSet = new Set<string>()
-    for (const [sid, rel] of relations) {
-      if (rel?.type === 'branch') branchChildSet.add(sid)
-    }
-
-    // 构建 Cluster（每个非 branch 子框为一个 cluster 的父框）
-    const clusters: Cluster[] = []
-    for (const sessionId of sessionIds) {
-      if (branchChildSet.has(sessionId)) continue
-
-      const leftChildren: BranchChild[] = []
-      const rightChildren: BranchChild[] = []
-
-      for (const [childId, rel] of relations) {
-        if (rel.type !== 'branch' || rel.parentSessionId !== sessionId) continue
-        if ((rel.side ?? 'right') === 'left') leftChildren.push({ id: childId, rel })
-        else rightChildren.push({ id: childId, rel })
-      }
-
-      clusters.push({ parentId: sessionId, leftChildren, rightChildren })
-    }
-
-    // 孤儿 branch（父框不在 sessionIds 中）退化为独立 cluster
+    const sessionIdSet = new Set(sessionIds)
+    const childrenByParent = new Map<string, string[]>()
     for (const [childId, rel] of relations) {
-      if (rel.type !== 'branch') continue
-      if (!rel.parentSessionId || sessionIds.includes(rel.parentSessionId)) continue
-      if (!sessionIds.includes(childId)) continue
-      clusters.push({ parentId: childId, leftChildren: [], rightChildren: [] })
+      if (
+        rel.type !== 'branch'
+        || !rel.parentSessionId
+        || !sessionIdSet.has(childId)
+        || !sessionIdSet.has(rel.parentSessionId)
+      ) continue
+      const children = childrenByParent.get(rel.parentSessionId) ?? []
+      children.push(childId)
+      childrenByParent.set(rel.parentSessionId, children)
+    }
+    for (const children of childrenByParent.values()) {
+      children.sort((a, b) => {
+        const ar = relations.get(a)
+        const br = relations.get(b)
+        return (ar?.branchIndex ?? 0) - (br?.branchIndex ?? 0)
+          || (startTimes?.get(a) ?? 0) - (startTimes?.get(b) ?? 0)
+          || a.localeCompare(b)
+      })
     }
 
-    // ── X 轴：Cluster-aware 水平居中排列 ──────────────────────────────────────
-    const clusterDims = clusters.map((c) => {
-      const left  = sideWidth(c.leftChildren)
-      const right = sideWidth(c.rightChildren)
-      return { left, right, total: left + FRAME_WIDTH + right }
+    const roots = sessionIds.filter((sessionId) => {
+      const parentId = relations.get(sessionId)?.parentSessionId
+      return !parentId || !sessionIdSet.has(parentId)
     })
+    roots.sort((a, b) =>
+      (startTimes?.get(a) ?? 0) - (startTimes?.get(b) ?? 0) || a.localeCompare(b),
+    )
 
-    const totalWidth = clusterDims.reduce((s, d) => s + d.total, 0)
-      + FRAME_GAP_X * (clusters.length - 1)
-    let cursorX = -(totalWidth / 2)
+    const assigned = new Set<string>()
+    const buildGeometry = (rootId: string): ClusterGeometry => {
+      const relativeX = new Map<string, number>([[rootId, 0]])
+      const memberIds: string[] = []
+      const visiting = new Set<string>()
+      const visit = (sessionId: string): void => {
+        if (assigned.has(sessionId) || visiting.has(sessionId)) return
+        visiting.add(sessionId)
+        assigned.add(sessionId)
+        memberIds.push(sessionId)
+        const parentX = relativeX.get(sessionId) ?? 0
+        for (const childId of childrenByParent.get(sessionId) ?? []) {
+          const rel = relations.get(childId)
+          if (!rel || assigned.has(childId) || visiting.has(childId)) continue
+          const lineLength = rel.lineLength ?? FRAME_GAP_X
+          relativeX.set(
+            childId,
+            (rel.side ?? 'right') === 'left'
+              ? parentX - lineLength - FRAME_WIDTH
+              : parentX + FRAME_WIDTH + lineLength,
+          )
+          visit(childId)
+        }
+        visiting.delete(sessionId)
+      }
+      visit(rootId)
+      const minX = Math.min(...memberIds.map((id) => relativeX.get(id) ?? 0), 0)
+      const maxRight = Math.max(...memberIds.map((id) => (relativeX.get(id) ?? 0) + FRAME_WIDTH), FRAME_WIDTH)
+      return { rootId, memberIds, relativeX, left: -minX, right: maxRight - FRAME_WIDTH }
+    }
+
+    const clusters: ClusterGeometry[] = roots.map(buildGeometry)
+    // 循环或关系损坏时仍让未分配节点退化为独立 Cluster，禁止静默丢框。
+    for (const sessionId of sessionIds) {
+      if (!assigned.has(sessionId)) clusters.push(buildGeometry(sessionId))
+    }
+    clusters.sort((a, b) =>
+      (startTimes?.get(a.rootId) ?? 0) - (startTimes?.get(b.rootId) ?? 0)
+      || a.rootId.localeCompare(b.rootId),
+    )
+
+    // ── X 轴：以最新（最右）Cluster 的父框 x=0 为稳定锚点 ───────────────────
+    // 后台发现更早 Cluster 时只向左扩展，已显示 Cluster 不会因总宽度重新居中而跳动。
+    const rootXMap = new Map<string, number>()
+    let rightNeighborLeft: number | null = null
+    for (let index = clusters.length - 1; index >= 0; index--) {
+      const cluster = clusters[index]
+      const rootX = rightNeighborLeft === null
+        ? 0
+        : rightNeighborLeft - FRAME_GAP_X - FRAME_WIDTH - cluster.right
+      rootXMap.set(cluster.rootId, rootX)
+      rightNeighborLeft = rootX - cluster.left
+    }
 
     // ── Y 轴：时间堆叠策略 ────────────────────────────────────────────────────
     // 按 startedAt 升序排列所有父框（cluster 代表），依次堆叠 Y 坐标
     // 每个父框的 Y = 比它早启动的所有框的 bottom_y 的最大值 + FRAME_GAP_Y
     // branch 子框 Y = 父框 Y + 父框高度（时间轴语义：branch 从父框底部接续延伸）
     const DEFAULT_H = 400
-    const parentYMap = new Map<string, number>()
+    const frameYMap = new Map<string, number>()
 
-    if (startTimes && startTimes.size > 0) {
-      // 按 startedAt 升序排列 cluster 父框
-      const sortedClusters = [...clusters].sort((a, b) => {
-        const ta = startTimes.get(a.parentId) ?? 0
-        const tb = startTimes.get(b.parentId) ?? 0
-        return ta - tb
-      })
-
-      // 记录每个已排列框的 bottom_y（含 branch 子框），用于后续框的起点计算
-      const bottomYMap = new Map<string, number>()
-
-      for (const cluster of sortedClusters) {
-        // 父框 Y = 比当前 startedAt 更早的所有框的 bottom_y 最大值 + FRAME_GAP_Y
-        const parentStart = startTimes.get(cluster.parentId) ?? 0
-        let maxPrevBottom = FRAME_GAP_Y
-
-        for (const [sid, bottom] of bottomYMap) {
-          const sStart = startTimes.get(sid) ?? 0
-          if (sStart < parentStart) {
-            maxPrevBottom = Math.max(maxPrevBottom, bottom + FRAME_GAP_Y)
-          }
-        }
-
-        const parentY = maxPrevBottom
-        parentYMap.set(cluster.parentId, parentY)
-        const parentH = heights.get(cluster.parentId) ?? DEFAULT_H
-        bottomYMap.set(cluster.parentId, parentY + parentH)
-
-        // branch 子框顶端 = 父框Y + frozenOffset（帧底端基准：parentH - FRAME_FOOTER_HEIGHT）
-        // 优先用持久化的 triggerYOffset（兼容旧数据），否则基于帧底端计算
-        // 连接线与 "继承记忆" 插入线同参考系（帧底部），对齐一致
-        const allChildren = [...cluster.leftChildren, ...cluster.rightChildren]
-        for (const { id: childId, rel } of allChildren) {
-          const frozenOffset = rel.triggerYOffset ?? computeFrozenOffset(parentH)
-          const childY = parentY + frozenOffset
-          const childH = heights.get(childId) ?? DEFAULT_H
-          console.log(`[Layout][DIAG] child=${childId.slice(0,8)} parentY=${Math.round(parentY)} triggerYOffset=${rel.triggerYOffset} frozenOffset=${Math.round(frozenOffset)} source=${rel.triggerYOffset !== undefined ? 'SNAPSHOT' : 'BOTTOM_BASED'} childY=${Math.round(childY)} parentH=${Math.round(parentH)}`)
-          bottomYMap.set(childId, childY + childH)
-          parentYMap.set(childId, childY)
+    // 独立 Cluster 顶部对齐；它们在 X 轴互不重叠。这样后台插入更早历史不会级联改变
+    // 已显示 Cluster 的 Y。Branch 仍从父框冻结位置延伸，保持继承记忆连线语义。
+    clusters.forEach((cluster) => {
+      frameYMap.set(cluster.rootId, FRAME_GAP_Y)
+      const visited = new Set<string>()
+      const visit = (parentId: string): void => {
+        if (visited.has(parentId)) return
+        visited.add(parentId)
+        const parentY = frameYMap.get(parentId) ?? FRAME_GAP_Y
+        const parentH = heights.get(parentId) ?? DEFAULT_H
+        for (const childId of childrenByParent.get(parentId) ?? []) {
+          if (!cluster.relativeX.has(childId)) continue
+          const rel = relations.get(childId)
+          const frozenOffset = rel?.triggerYOffset ?? computeFrozenOffset(parentH)
+          frameYMap.set(childId, parentY + frozenOffset)
+          visit(childId)
         }
       }
-    } else {
-      // fallback：所有父框顶部对齐，branch 子框顶端 = 父框Y + triggerYOffset（或帧底端偏移）
-      clusters.forEach((c) => {
-        parentYMap.set(c.parentId, FRAME_GAP_Y)
-        const parentH = heights.get(c.parentId) ?? DEFAULT_H
-        const allChildren = [...c.leftChildren, ...c.rightChildren]
-        allChildren.forEach(({ id: childId, rel }) => {
-          const frozenOffset = rel.triggerYOffset ?? computeFrozenOffset(parentH)
-          parentYMap.set(childId, FRAME_GAP_Y + frozenOffset)
-        })
-      })
-    }
+      visit(cluster.rootId)
+    })
 
     // ── 组装结果 ───────────────────────────────────────────────────────────────
     const result: FrameLayout[] = []
 
     for (let i = 0; i < clusters.length; i++) {
-      const cluster  = clusters[i]
-      const { left } = clusterDims[i]
-      const parentX  = cursorX + left
-      const parentY  = parentYMap.get(cluster.parentId) ?? FRAME_GAP_Y
-
-      result.push({ sessionId: cluster.parentId, x: parentX, y: parentY, width: FRAME_WIDTH })
-
-      // 左侧 branch 子框
-      for (const { id: childId, rel } of cluster.leftChildren) {
-        const lineLen = rel.lineLength ?? FRAME_GAP_X
-        const childY  = parentYMap.get(childId) ?? parentY
+      const cluster = clusters[i]
+      const rootX = rootXMap.get(cluster.rootId) ?? 0
+      for (const sessionId of cluster.memberIds) {
         result.push({
-          sessionId: childId,
-          x: parentX - lineLen - FRAME_WIDTH,
-          y: childY,
+          sessionId,
+          x: rootX + (cluster.relativeX.get(sessionId) ?? 0),
+          y: frameYMap.get(sessionId) ?? FRAME_GAP_Y,
           width: FRAME_WIDTH,
         })
       }
-
-      // 右侧 branch 子框
-      for (const { id: childId, rel } of cluster.rightChildren) {
-        const lineLen = rel.lineLength ?? FRAME_GAP_X
-        const childY  = parentYMap.get(childId) ?? parentY
-        result.push({
-          sessionId: childId,
-          x: parentX + FRAME_WIDTH + lineLen,
-          y: childY,
-          width: FRAME_WIDTH,
-        })
-      }
-
-      cursorX += clusterDims[i].total + FRAME_GAP_X
     }
 
-    console.log(`[Layout] result:`, result.map((l) =>
-      `${l.sessionId.slice(0,8)} x=${l.x} y=${Math.round(l.y)}`
-    ).join(' | '))
+    console.debug(`[Layout] frames=${result.length} clusters=${clusters.length}`)
 
     return result
-  }, [sessionIds, heights, relations, nodeYOffsets, startTimes])
+}
+
+export function useSessionFrameLayout(
+  sessionIds: string[],
+  heights: Map<string, number>,
+  relations: RelationsMap,
+  nodeYOffsets?: Map<string, number[]>,
+  startTimes?: Map<string, number>,
+): FrameLayout[] {
+  return useMemo(
+    () => computeSessionFrameLayout(sessionIds, heights, relations, nodeYOffsets, startTimes),
+    [sessionIds, heights, relations, nodeYOffsets, startTimes],
+  )
 }

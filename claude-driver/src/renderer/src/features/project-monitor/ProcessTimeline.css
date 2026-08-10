@@ -164,6 +164,16 @@
   word-break: break-word;
 }
 
+/*
+ * 超长历史框只跳过屏外重量正文的绘制。结构 wrapper、data-nodeid、插入线、
+ * Branch Handle 与操作栏仍留在正常文档流中，因此键盘顺序和连接锚点不变。
+ * `auto` 会在元素首次真实布局后记住尺寸，80px 只用于尚未测量的屏外正文。
+ */
+.ptl-paint-body {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+
 .ptl-expand-btn {
   font-size: var(--text-xs);
   color: var(--tx4);

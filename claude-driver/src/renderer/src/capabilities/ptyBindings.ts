@@ -9,10 +9,27 @@ type Store = Pick<TestStore, 'get' | 'set'>
 
 /** I1: 建立 ptyId ↔ claudeId 双向绑定 */
 export function bindPty(store: Store, ptyId: string, claudeId: string): void {
-  store.set(ptyBindingsAtom, (prev) => ({
-    ptyToClaudeMap: new Map(prev.ptyToClaudeMap).set(ptyId, claudeId),
-    claudeToPtyMap: new Map(prev.claudeToPtyMap).set(claudeId, ptyId),
-  }))
+  store.set(ptyBindingsAtom, (prev) => {
+    const ptyToClaudeMap = new Map(prev.ptyToClaudeMap)
+    const claudeToPtyMap = new Map(prev.claudeToPtyMap)
+
+    // 保持一一映射：Branch 会让同一 PTY 从父主线切到子会话；resume 会让同一
+    // Claude 会话切到新 PTY。若残留旧边，后续输入与 JSONL 会各走一条边。
+    const previousClaudeId = ptyToClaudeMap.get(ptyId)
+    if (previousClaudeId && previousClaudeId !== claudeId
+      && claudeToPtyMap.get(previousClaudeId) === ptyId) {
+      claudeToPtyMap.delete(previousClaudeId)
+    }
+    const previousPtyId = claudeToPtyMap.get(claudeId)
+    if (previousPtyId && previousPtyId !== ptyId
+      && ptyToClaudeMap.get(previousPtyId) === claudeId) {
+      ptyToClaudeMap.delete(previousPtyId)
+    }
+
+    ptyToClaudeMap.set(ptyId, claudeId)
+    claudeToPtyMap.set(claudeId, ptyId)
+    return { ptyToClaudeMap, claudeToPtyMap }
+  })
 }
 
 /** I2: 解除 ptyId ↔ claudeId 双向绑定；若任一 id 不存在则无副作用 */
@@ -20,8 +37,9 @@ export function unbindPty(store: Store, ptyId: string, claudeId: string): void {
   store.set(ptyBindingsAtom, (prev) => {
     const p2c = new Map(prev.ptyToClaudeMap)
     const c2p = new Map(prev.claudeToPtyMap)
-    p2c.delete(ptyId)
-    c2p.delete(claudeId)
+    // 迟到的旧 PTY_UNBIND 不能删掉同一 Claude 会话刚建立的新 PTY 绑定。
+    if (p2c.get(ptyId) === claudeId) p2c.delete(ptyId)
+    if (c2p.get(claudeId) === ptyId) c2p.delete(claudeId)
     return { ptyToClaudeMap: p2c, claudeToPtyMap: c2p }
   })
 }

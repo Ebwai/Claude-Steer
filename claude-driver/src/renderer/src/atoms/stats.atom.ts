@@ -5,7 +5,7 @@
 import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
 import type { TokenStats, StatusLineData, DriverConfig } from '@shared/types/index'
-import { activeSessionsAtom } from './session-core.atom'
+import { tokenInventoryAtom } from './token-inventory.atom'
 
 // ── per-session token 消耗（来自 JSONL usage 字段）────────────────────────────
 
@@ -47,28 +47,26 @@ const DEFAULT_DRIVER_CONFIG: DriverConfig = {
 /** driverConfig 的 renderer 侧镜像，由 tokenCapability.setDriverConfig 写入 */
 export const driverConfigAtom = atom<DriverConfig>({ ...DEFAULT_DRIVER_CONFIG })
 
-// ── 全局 Token 统计（派生 atom，从 activeSessionsAtom + sessionTokensAtom 聚合）──
+// ── 全局 Token 统计（派生 atom，从独立 tokenInventoryAtom 聚合）──────────────
 
 /**
  * 全局 Token 统计——本月 / 累计 / 常用模型 / 按项目分摊
  * 纯派生，无需手动写入，订阅后自动随 session token 数据变化重算
  */
 export const tokenStatsAtom = atom<TokenStats>((get) => {
-  const sessions = get(activeSessionsAtom)
+  const inventory = get(tokenInventoryAtom)
   const driverConfig = get(driverConfigAtom)
 
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
 
   let monthlyTokens = 0
   let totalCostUsd = 0
-  let todayCostUsd = 0
   const modelCount: Record<string, number> = {}
   const costByProject: Record<string, number> = {}
 
-  for (const [claudeId, session] of sessions) {
-    const tokens = get(sessionTokensAtom(claudeId))
+  for (const session of inventory.values()) {
+    const tokens = session.usage
     const totalTokens = tokens.inputTokens + tokens.outputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens
     if (totalTokens === 0) continue
 
@@ -78,11 +76,6 @@ export const tokenStatsAtom = atom<TokenStats>((get) => {
       (tokens.outputTokens / 1_000_000) * driverConfig.tokenPriceOutputPerM
 
     totalCostUsd += sessionCost
-
-    // 今日费用
-    if (session.startedAt >= todayStart) {
-      todayCostUsd += sessionCost
-    }
 
     // 本月 token
     if (session.startedAt >= monthStart) {
@@ -95,8 +88,8 @@ export const tokenStatsAtom = atom<TokenStats>((get) => {
     }
 
     // 模型计数
-    if (tokens.model) {
-      modelCount[tokens.model] = (modelCount[tokens.model] ?? 0) + 1
+    if (session.model) {
+      modelCount[session.model] = (modelCount[session.model] ?? 0) + 1
     }
   }
 
@@ -112,15 +105,15 @@ export const tokenStatsAtom = atom<TokenStats>((get) => {
 
 /** 今日估算费用 USD（从 tokenStatsAtom 派生，供 TitleBar 显示） */
 export const todayCostUsdAtom = atom<number>((get) => {
-  const sessions = get(activeSessionsAtom)
+  const inventory = get(tokenInventoryAtom)
   const driverConfig = get(driverConfigAtom)
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
 
   let todayCost = 0
-  for (const [claudeId, session] of sessions) {
+  for (const session of inventory.values()) {
     if (session.startedAt < todayStart) continue
-    const tokens = get(sessionTokensAtom(claudeId))
+    const tokens = session.usage
     if (tokens.inputTokens + tokens.outputTokens === 0) continue
     todayCost +=
       ((tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens) / 1_000_000) * driverConfig.tokenPriceInputPerM +
@@ -131,14 +124,14 @@ export const todayCostUsdAtom = atom<number>((get) => {
 
 /** 今日 token 用量（从 sessionTokensAtom 聚合今日 session，供 TitleBar 显示） */
 export const todayTokensAtom = atom<number>((get) => {
-  const sessions = get(activeSessionsAtom)
+  const inventory = get(tokenInventoryAtom)
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
 
   let total = 0
-  for (const [claudeId, session] of sessions) {
+  for (const session of inventory.values()) {
     if (session.startedAt < todayStart) continue
-    const tokens = get(sessionTokensAtom(claudeId))
+    const tokens = session.usage
     total += tokens.inputTokens + tokens.outputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens
   }
   return total
@@ -147,11 +140,11 @@ export const todayTokensAtom = atom<number>((get) => {
 /** 按项目 ID 聚合该项目所有 session 的 token 总消耗 */
 export const projectTotalTokensAtom = atomFamily((projectId: string) =>
   atom<number>((get) => {
-    const sessions = get(activeSessionsAtom)
+    const inventory = get(tokenInventoryAtom)
     let total = 0
-    for (const [claudeId, session] of sessions) {
+    for (const session of inventory.values()) {
       if (session.projectId !== projectId) continue
-      const tokens = get(sessionTokensAtom(claudeId))
+      const tokens = session.usage
       total += tokens.inputTokens + tokens.outputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens
     }
     return total

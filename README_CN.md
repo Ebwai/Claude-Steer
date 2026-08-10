@@ -58,6 +58,7 @@ Claude Steer 是一款跨平台桌面端 Harness AI 的辅助工具，它是：
 ## 目标用户
 
 如果你正在使用 Claude Code（或计划使用），并且有以下任一需求，Claude Steer 可能适合你：
+产品设计以及需求-解决介绍网站：https://claude-steer-map.starkliang004.chatgpt.site/
 
 ### 👀 工作流可视化
 

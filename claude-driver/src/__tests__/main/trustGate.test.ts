@@ -128,6 +128,43 @@ describe('TrustGate', () => {
     expect(sendInput).toHaveBeenCalledTimes(1)
   })
 
+  it('flushes deferred input when the normal Claude input prompt is visible before a transcript exists', () => {
+    const { gate, confirmTrust } = createTestGate()
+    const sendInput = vi.fn()
+
+    expect(gate.deferUntilReady(sendInput, 'programmatic-session-input')).toBe(true)
+    expect(gate.inspect('\u001b[9;1H❯\u00a0\u001b[7m \u001b[27m')).toBe(false)
+
+    expect(gate.state).toBe('ready')
+    expect(sendInput).toHaveBeenCalledTimes(1)
+    expect(confirmTrust).not.toHaveBeenCalled()
+  })
+
+  it('does not treat the trust-dialog selection marker as the normal input prompt', () => {
+    const { gate } = createTestGate()
+    const sendInput = vi.fn()
+
+    gate.deferUntilReady(sendInput, 'programmatic-session-input')
+    expect(gate.inspect(`${QUESTION}\n${OPTION}`)).toBe(true)
+
+    expect(gate.state).toBe('handled')
+    expect(sendInput).not.toHaveBeenCalled()
+  })
+
+  it('flushes deferred input when the normal prompt appears after trust confirmation', () => {
+    const { gate, confirmTrust } = createTestGate()
+    const sendInput = vi.fn()
+
+    gate.deferUntilReady(sendInput, 'programmatic-session-input')
+    expect(gate.inspect(`${QUESTION}\n${OPTION}`)).toBe(true)
+    expect(sendInput).not.toHaveBeenCalled()
+
+    expect(gate.inspect('\u001b[9;1H❯\u00a0\u001b[7m \u001b[27m')).toBe(false)
+    expect(gate.state).toBe('ready')
+    expect(confirmTrust).toHaveBeenCalledTimes(1)
+    expect(sendInput).toHaveBeenCalledTimes(1)
+  })
+
   it('drops deferred input when startup is disposed', () => {
     const { gate } = createTestGate()
     const sendInput = vi.fn()

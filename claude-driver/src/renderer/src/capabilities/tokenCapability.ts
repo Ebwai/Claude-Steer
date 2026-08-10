@@ -6,10 +6,30 @@
 import { IPC } from '@shared/events/ipc-channels'
 import type { JsonlRecord } from '@shared/types/jsonl'
 import type { DriverConfig } from '@shared/types/index'
+import type { HistoryTokenInventoryEntry } from '@shared/types/history'
 import { sessionTokensAtom, driverConfigAtom, type SessionTokens } from '@renderer/atoms/stats.atom'
+import { tokenInventoryAtom } from '@renderer/atoms/token-inventory.atom'
+import { activeSessionsAtom } from '@renderer/atoms/session-core.atom'
 import type { TestStore } from '../../../__tests__/helpers/createTestStore'
 
 type Store = Pick<TestStore, 'get' | 'set'>
+
+export function upsertTokenInventory(store: Store, entries: HistoryTokenInventoryEntry[]): void {
+  store.set(tokenInventoryAtom, (prev) => {
+    const next = new Map(prev)
+    entries.forEach((entry) => next.set(entry.sessionId, entry))
+    return next
+  })
+  console.info(`[TokenCapability] inventory upsert entries=${entries.length}`)
+}
+
+export function removeTokenInventoryEntries(store: Store, sessionIds: Iterable<string>): void {
+  store.set(tokenInventoryAtom, (prev) => {
+    const next = new Map(prev)
+    for (const sessionId of sessionIds) next.delete(sessionId)
+    return next
+  })
+}
 
 // ── 路径 1：历史扫描——从 transcriptPath 读取 JSONL 汇总 token ────────────────
 
@@ -51,6 +71,17 @@ export async function updateSessionTokensFromFile(
       model:               model ?? prev.model,
     }))
 
+    const session = store.get(activeSessionsAtom).get(claudeId)
+    if (session) {
+      upsertTokenInventory(store, [{
+        sessionId: claudeId,
+        projectId: session.projectId,
+        startedAt: session.startedAt,
+        model,
+        usage: { inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens },
+      }])
+    }
+
     console.log(`[TokenCapability] Scanned ${claudeId.slice(0, 8)}: input=${inputTokens} output=${outputTokens} cacheCreate=${cacheCreationTokens} cacheRead=${cacheReadTokens} model=${model}`)
   } catch (err) {
     console.warn(`[TokenCapability] updateSessionTokensFromFile error for ${claudeId.slice(0, 8)}:`, err)
@@ -70,13 +101,30 @@ export function addTokensFromRecord(store: Store, claudeId: string, record: Json
 
   if (inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens === 0) return
 
-  store.set(sessionTokensAtom(claudeId), (prev: SessionTokens) => ({
-    inputTokens:         prev.inputTokens + inputTokens,
-    outputTokens:        prev.outputTokens + outputTokens,
-    cacheCreationTokens: prev.cacheCreationTokens + cacheCreationTokens,
-    cacheReadTokens:     prev.cacheReadTokens + cacheReadTokens,
-    model:               record.model ?? prev.model,
-  }))
+  const previous = store.get(sessionTokensAtom(claudeId))
+  const nextTokens: SessionTokens = {
+    inputTokens: previous.inputTokens + inputTokens,
+    outputTokens: previous.outputTokens + outputTokens,
+    cacheCreationTokens: previous.cacheCreationTokens + cacheCreationTokens,
+    cacheReadTokens: previous.cacheReadTokens + cacheReadTokens,
+    model: record.model ?? previous.model,
+  }
+  store.set(sessionTokensAtom(claudeId), nextTokens)
+  const session = store.get(activeSessionsAtom).get(claudeId)
+  if (session) {
+    upsertTokenInventory(store, [{
+      sessionId: claudeId,
+      projectId: session.projectId,
+      startedAt: session.startedAt,
+      model: nextTokens.model,
+      usage: {
+        inputTokens: nextTokens.inputTokens,
+        outputTokens: nextTokens.outputTokens,
+        cacheCreationTokens: nextTokens.cacheCreationTokens,
+        cacheReadTokens: nextTokens.cacheReadTokens,
+      },
+    }])
+  }
 }
 
 // ── 路径 3：driverConfig 同步──────────────────────────────────────────────────

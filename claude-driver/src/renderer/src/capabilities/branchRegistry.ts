@@ -25,6 +25,8 @@ export function registerBranch(
     triggerYOffset?: number
   }
 ): void {
+  // 同一 child 的重复注册幂等；历史重载/实时 IPC 竞态不会重复占用 Branch 序号。
+  if (store.get(sessionRelationsAtom).has(childId)) return
   // key = parentClaudeId，统计该父 session 下所有 branch 总数（不区分触发节点）
   // 决定 side/lineLength 的是该父 session 整体的第几个 branch，与触发位置无关
   const countKey = parentClaudeId
@@ -59,6 +61,45 @@ export function registerBranch(
   store.set(sessionRelationsAtom, (prev) => {
     const next = new Map(prev)
     next.set(childId, relation)
+    return next
+  })
+}
+
+/** 删除单个 Branch 关系，并将同父剩余 Branch 从 1 开始紧凑重排。 */
+export function unregisterBranch(store: Store, childId: string): void {
+  const parentId = store.get(sessionRelationsAtom).get(childId)?.parentSessionId
+  store.set(sessionRelationsAtom, (prev) => {
+    if (!prev.has(childId)) return prev
+    const next = new Map(prev)
+    next.delete(childId)
+    return next
+  })
+  if (parentId) reindexChildren(store, parentId)
+}
+
+/** 依据当前剩余 relation 的既有顺序 + childId 确定性重算 side/lineLength/branchIndex。 */
+export function reindexChildren(store: Store, parentId: string): void {
+  const children = Array.from(store.get(sessionRelationsAtom).entries())
+    .filter(([, relation]) => relation.type === 'branch' && relation.parentSessionId === parentId)
+    .sort(([idA, a], [idB, b]) => (a.branchIndex ?? Number.MAX_SAFE_INTEGER) - (b.branchIndex ?? Number.MAX_SAFE_INTEGER) || idA.localeCompare(idB))
+  store.set(sessionRelationsAtom, (prev) => {
+    const next = new Map(prev)
+    children.forEach(([childId, relation], index) => {
+      const branchIndex = index + 1
+      const sameDirectionIndex = Math.ceil(branchIndex / 2)
+      next.set(childId, {
+        ...relation,
+        branchIndex,
+        side: branchIndex % 2 === 1 ? 'right' : 'left',
+        lineLength: FRAME_GAP_X + (sameDirectionIndex - 1) * (FRAME_WIDTH + FRAME_GAP_X),
+      })
+    })
+    return next
+  })
+  store.set(branchCountAtom, (prev) => {
+    const next = new Map(prev)
+    if (children.length === 0) next.delete(parentId)
+    else next.set(parentId, children.length)
     return next
   })
 }

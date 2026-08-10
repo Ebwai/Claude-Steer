@@ -31,13 +31,36 @@ interface WatchedFile {
   agentId?: string
   /** 上次读取的字节偏移（tail 追加模式的核心） */
   readOffset: number
-  /** 上一行是否为 file-history-snapshot（用于标记下一条 user 记录为 isBranchStart） */
+  /** 是否正等待 file-history-snapshot 后的下一条普通 user 记录 */
   prevWasHistorySnapshot?: boolean
+  /** JSONL 是否通过顶层 forkedFrom 声明为 Branch 会话 */
+  isBranchTranscript?: boolean
+  /** 是否已观察到旧版 file-history-snapshot 标记 */
+  hasHistorySnapshot?: boolean
+  /** 是否已经为当前 Branch 标记过首条可见 user 记录 */
+  branchStartMarked?: boolean
+  /** 持有该文件监听的 Session consumer lease key。 */
+  consumers: Set<string>
+}
+
+interface WatchedDirectory {
+  path: string
+  owners: Set<string>
+}
+
+export interface JsonlWatcherResourceSnapshot {
+  sessions: number
+  files: number
+  directories: number
+  consumers: number
+  inFlightStreams: number
 }
 
 export class JsonlWatcher {
   private watcher: FSWatcher | null = null
   private watchedFiles = new Map<string, WatchedFile>()
+  private watchedDirectories = new Map<string, WatchedDirectory>()
+  private activeStreamsByFile = new Map<string, Set<fs.ReadStream>>()
   private callbacks: JsonlWatcherCallbacks
 
   constructor(callbacks: JsonlWatcherCallbacks) {
@@ -51,12 +74,26 @@ export class JsonlWatcher {
    * @param readFromStart 是否从头全量读取（历史模式），默认 false（tail 模式）
    * @param agentId 若为 subagent 文件，传入 agentId；主 session 文件省略
    */
-  watchFile(filePath: string, sessionId: string, readFromStart = false, agentId?: string): void {
-    const alreadyWatched = this.watchedFiles.has(filePath)
+  watchFile(
+    filePath: string,
+    sessionId: string,
+    readFromStart = false,
+    agentId?: string,
+    consumerId = 'legacy',
+  ): void {
+    const consumerKey = this.consumerKey(sessionId, consumerId)
+    const watched = this.watchedFiles.get(filePath)
+    const alreadyWatched = watched !== undefined
 
     if (!alreadyWatched) {
       const initialOffset = readFromStart ? 0 : this.getFileSize(filePath)
-      this.watchedFiles.set(filePath, { filePath, sessionId, agentId, readOffset: initialOffset })
+      this.watchedFiles.set(filePath, {
+        filePath,
+        sessionId,
+        agentId,
+        readOffset: initialOffset,
+        consumers: new Set([consumerKey]),
+      })
 
       if (readFromStart) {
         // 历史模式：立即全量读取
@@ -66,6 +103,26 @@ export class JsonlWatcher {
       this.ensureWatcher()
       this.watcher?.add(filePath)
       console.log(`[JsonlWatcher] Watching ${filePath} (offset: ${initialOffset})`)
+    } else {
+      // 先登记、后建文件是新会话的正常时序：renderer 会在 SessionStart 后立即请求监听，
+      // 此时 JSONL 可能尚不存在；autoWatchTranscript 找到真实文件后会再次以
+      // readFromStart=true 调用。Windows/chokidar 不保证先前对不存在文件的 add 能收到
+      // 后续创建事件，因此这里必须重新挂载真实文件，并补读尚未消费的首批内容。
+      if (watched.sessionId !== sessionId) {
+        this.migrateSessionConsumers(watched.sessionId, sessionId)
+      }
+      watched.sessionId = sessionId
+      watched.agentId = agentId
+      watched.consumers.add(consumerKey)
+      this.ensureWatcher()
+      this.watcher?.add(filePath)
+      const currentSize = this.getFileSize(filePath)
+      if (readFromStart && watched.readOffset === 0 && currentSize > 0) {
+        console.info(
+          `[JsonlWatcher] Reconciled pre-registered transcript: session=${sessionId.slice(0, 8)} bytes=${currentSize}`,
+        )
+        this.readNewContent(filePath)
+      }
     }
 
     // 主 session 文件：始终尝试激活 subagents/ 目录监听与扫描
@@ -79,11 +136,12 @@ export class JsonlWatcher {
       const projectDir = path.dirname(filePath)  // ~/.claude/projects/<encoded>/
       const sessionUuidDir = filePath.replace(/\.jsonl$/, '')  // 同名目录（可能不存在）
       this.ensureWatcher()
-      this.watcher?.add(projectDir)     // 可靠地监听整个项目目录（必然存在）
-      this.watcher?.add(sessionUuidDir) // 也尝试监听（若已存在则立即生效）
 
       // 扫描已有 subagent 文件（历史 session 或当前 session 已运行过 subagent）
       const subagentsDir = path.join(sessionUuidDir, 'subagents')
+      this.addDirectoryLease(projectDir, consumerKey)
+      this.addDirectoryLease(sessionUuidDir, consumerKey)
+      this.addDirectoryLease(subagentsDir, consumerKey)
       this.scanSubagentsDir(subagentsDir, sessionId)
 
       if (!alreadyWatched) {
@@ -106,15 +164,77 @@ export class JsonlWatcher {
 
   /** 停止监听指定文件 */
   unwatchFile(filePath: string): void {
-    this.watchedFiles.delete(filePath)
-    this.watcher?.unwatch(filePath)
+    this.disposeWatchedFile(filePath)
+  }
+
+  /** 仅释放一个 renderer/main consumer；其他 consumer 仍持有时继续监听。 */
+  releaseSessionConsumer(sessionId: string, consumerId: string): JsonlWatcherResourceSnapshot {
+    const consumerKey = this.consumerKey(sessionId, consumerId)
+    for (const [filePath, watched] of this.watchedFiles) {
+      if (watched.sessionId !== sessionId || !watched.consumers.delete(consumerKey)) continue
+      if (watched.consumers.size === 0) this.disposeWatchedFile(filePath)
+    }
+    this.releaseDirectoryOwner(consumerKey)
+    const snapshot = this.getResourceSnapshot()
+    console.info(
+      `[JsonlWatcher] Lease released session=${sessionId.slice(0, 8)} consumer=${consumerId} files=${snapshot.files} dirs=${snapshot.directories} consumers=${snapshot.consumers}`,
+    )
+    return snapshot
+  }
+
+  /**
+   * 停止监听某个 Session 的主 JSONL 与全部 Subagent JSONL。
+   * 删除事务在 rename 前调用，避免 Windows 文件占用和迟到记录回插。
+   * 重复调用幂等；返回本次释放数量便于诊断。
+   */
+  unwatchSession(sessionId: string): number {
+    const targets = Array.from(this.watchedFiles.entries())
+      .filter(([, watched]) => watched.sessionId === sessionId)
+      .map(([filePath]) => filePath)
+    for (const filePath of targets) this.disposeWatchedFile(filePath)
+    this.releaseDirectoryOwnersForSession(sessionId)
+    console.info(`[JsonlWatcher] Unwatched session=${sessionId.slice(0, 8)} files=${targets.length}`)
+    return targets.length
   }
 
   /** 停止所有监听 */
   close(): void {
+    for (const streams of this.activeStreamsByFile.values()) {
+      for (const stream of streams) stream.destroy()
+    }
+    this.activeStreamsByFile.clear()
     this.watcher?.close()
     this.watcher = null
     this.watchedFiles.clear()
+    this.watchedDirectories.clear()
+  }
+
+  getResourceSnapshot(): JsonlWatcherResourceSnapshot {
+    const sessions = new Set(Array.from(this.watchedFiles.values(), (item) => item.sessionId)).size
+    const consumerKeys = new Set<string>()
+    for (const watched of this.watchedFiles.values()) {
+      watched.consumers.forEach((consumer) => consumerKeys.add(consumer))
+    }
+    for (const directory of this.watchedDirectories.values()) {
+      directory.owners.forEach((consumer) => consumerKeys.add(consumer))
+    }
+    let inFlightStreams = 0
+    for (const streams of this.activeStreamsByFile.values()) inFlightStreams += streams.size
+    return {
+      sessions,
+      files: this.watchedFiles.size,
+      directories: this.watchedDirectories.size,
+      consumers: consumerKeys.size,
+      inFlightStreams,
+    }
+  }
+
+  hasSessionConsumer(sessionId: string, consumerId: string): boolean {
+    const consumerKey = this.consumerKey(sessionId, consumerId)
+    for (const watched of this.watchedFiles.values()) {
+      if (watched.sessionId === sessionId && watched.consumers.has(consumerKey)) return true
+    }
+    return false
   }
 
   // ── 内部方法 ────────────────────────────────────────────────────────────
@@ -157,18 +277,25 @@ export class JsonlWatcher {
           }
           // fallback：若找不到父 PTY ID，用 sessionUuid 本身（会导致渲染侧找不到 session）
           const sessionId = parentPtyId ?? subagentInfo.sessionUuid
+          const consumers = this.findSessionConsumers(subagentInfo.sessionUuid)
           this.watchedFiles.set(filePath, {
             filePath,
             sessionId,
             agentId: subagentInfo.agentId,
             readOffset: 0,
+            consumers,
           })
           console.log(`[JsonlWatcher] Subagent JSONL detected: ${filePath} (agentId: ${subagentInfo.agentId}, parentSession: ${sessionId})`)
         } else {
           // 普通主 session 文件
           const sessionId = extractSessionIdFromPath(filePath)
           if (sessionId) {
-            this.watchedFiles.set(filePath, { filePath, sessionId, readOffset: 0 })
+            this.watchedFiles.set(filePath, {
+              filePath,
+              sessionId,
+              readOffset: 0,
+              consumers: new Set([this.consumerKey(sessionId, 'project-discovery')]),
+            })
             console.log(`[JsonlWatcher] New JSONL detected: ${filePath}`)
           }
         }
@@ -241,16 +368,23 @@ export class JsonlWatcher {
           }
         }
         const sessionId = parentPtyId ?? subagentInfo.sessionUuid
+        const consumers = this.findSessionConsumers(subagentInfo.sessionUuid)
         this.watchedFiles.set(filePath, {
           filePath,
           sessionId,
           agentId: subagentInfo.agentId,
           readOffset: 0,
+          consumers,
         })
       } else {
         const sessionId = extractSessionIdFromPath(filePath)
         if (sessionId) {
-          this.watchedFiles.set(filePath, { filePath, sessionId, readOffset: 0 })
+          this.watchedFiles.set(filePath, {
+            filePath,
+            sessionId,
+            readOffset: 0,
+            consumers: new Set([this.consumerKey(sessionId, 'project-discovery')]),
+          })
         }
       }
     }
@@ -262,9 +396,6 @@ export class JsonlWatcher {
    * 场景：重新打开历史 session 时，subagent 文件已存在但不会触发 add 事件
    */
   private scanSubagentsDir(subagentsDir: string, parentSessionId: string): void {
-    // 无论目录是否存在，都用 chokidar 监听（目录出现时自动生效）
-    this.watcher?.add(subagentsDir)
-
     try {
       if (!fs.existsSync(subagentsDir)) return
       const files = fs.readdirSync(subagentsDir)
@@ -281,6 +412,7 @@ export class JsonlWatcher {
           sessionId: parentSessionId,
           agentId: subagentInfo.agentId,
           readOffset: 0,
+          consumers: this.findSessionConsumers(parentSessionId),
         })
         this.watcher?.add(filePath)
         console.log(`[JsonlWatcher] Existing subagent file found: ${filePath} (agentId: ${subagentInfo.agentId})`)
@@ -307,6 +439,9 @@ export class JsonlWatcher {
         end: stat.size - 1,
         encoding: 'utf-8'
       })
+      const activeStreams = this.activeStreamsByFile.get(filePath) ?? new Set<fs.ReadStream>()
+      activeStreams.add(stream)
+      this.activeStreamsByFile.set(filePath, activeStreams)
 
       let buffer = ''
 
@@ -315,22 +450,42 @@ export class JsonlWatcher {
       })
 
       stream.on('end', () => {
+        if (this.watchedFiles.get(filePath) !== watched) return
         watched.readOffset = stat.size
 
-        // 按行分割，逐行解析
+        // 按行分割。先扫描整个新增批次的 Branch 元信息，再逐行解析：
+        // 旧版 Branch 可能包含父会话前缀并依赖 file-history-snapshot，必须优先沿用 snapshot；
+        // Claude Code 2.1.197 的 Branch JSONL 不再写 snapshot：继承的父历史记录带 forkedFrom，
+        // 随后的 Branch 本地记录不带 forkedFrom，此时第一条本地 user 才是 Branch 起点。
         const lines = buffer.split('\n')
-        for (const line of lines) {
+        const rawLines = lines.map((line) => {
+          if (!line.trim()) return { line, raw: null as Record<string, unknown> | null }
+          try {
+            return { line, raw: JSON.parse(line) as Record<string, unknown> }
+          } catch {
+            return { line, raw: null as Record<string, unknown> | null }
+          }
+        })
+        if (rawLines.some(({ raw }) => raw?.['type'] === 'file-history-snapshot')) {
+          watched.hasHistorySnapshot = true
+        }
+        if (rawLines.some(({ raw }) => {
+          const forkedFrom = raw?.['forkedFrom']
+          return typeof forkedFrom === 'object'
+            && forkedFrom !== null
+            && typeof (forkedFrom as Record<string, unknown>)['sessionId'] === 'string'
+        })) {
+          watched.isBranchTranscript = true
+        }
+
+        for (const { line, raw } of rawLines) {
           if (!line.trim()) continue
 
-          // 追踪 file-history-snapshot：下一条 user 记录标记为 isBranchStart
-          const prevSnapshot = watched.prevWasHistorySnapshot ?? false
-          watched.prevWasHistorySnapshot = false
-          try {
-            const raw = JSON.parse(line) as Record<string, unknown>
-            if (raw['type'] === 'file-history-snapshot') {
-              watched.prevWasHistorySnapshot = true
-            }
-          } catch { /* ignore */ }
+          // 追踪 file-history-snapshot：下一条可解析的普通 user 记录标记为 isBranchStart。
+          // attachment/system 等不可见元数据行不能提前消费 pending 标记。
+          if (raw?.['type'] === 'file-history-snapshot') {
+            watched.prevWasHistorySnapshot = true
+          }
 
           const record = parseJsonlLine(line)
           if (record) {
@@ -340,13 +495,38 @@ export class JsonlWatcher {
               record.agentId = watched.agentId
               record.isSidechain = true
             }
-            // 上一行是 file-history-snapshot 且当前是 user → 这是 /branch 后第一条消息
-            if (prevSnapshot && record.type === 'user') {
+            // 旧版：snapshot 后第一条 user；新版无 snapshot：跳过带 forkedFrom 的继承前缀，
+            // 将第一条不带 forkedFrom 的 Branch 本地 user 标为起点。
+            const isSnapshotStart = watched.prevWasHistorySnapshot === true && record.type === 'user'
+            const forkedFrom = raw?.['forkedFrom']
+            const rawIsInheritedForkRecord = typeof forkedFrom === 'object'
+              && forkedFrom !== null
+              && typeof (forkedFrom as Record<string, unknown>)['sessionId'] === 'string'
+            const isForkedFromFallbackStart = !watched.hasHistorySnapshot
+              && watched.isBranchTranscript
+              && !watched.branchStartMarked
+              && !rawIsInheritedForkRecord
+              && record.type === 'user'
+            if (isSnapshotStart || isForkedFromFallbackStart) {
               record.isBranchStart = true
+              watched.branchStartMarked = true
+              watched.prevWasHistorySnapshot = false
+              console.log(
+                `[JsonlWatcher] Branch start marked session=${watched.sessionId} strategy=${isSnapshotStart ? 'snapshot' : 'forkedFrom-boundary-user'} uuid=${record.uuid ?? 'none'}`,
+              )
             }
+            // raw 只服务于本次主进程分支边界判断；跨 IPC 前立即断开大对象引用。
+            delete record.raw
+            if (this.watchedFiles.get(filePath) !== watched) return
             this.callbacks.onRecord(record, watched.sessionId, filePath, watched.agentId)
           }
         }
+      })
+
+      stream.on('close', () => {
+        const current = this.activeStreamsByFile.get(filePath)
+        current?.delete(stream)
+        if (current?.size === 0) this.activeStreamsByFile.delete(filePath)
       })
 
       stream.on('error', (err) => {
@@ -366,5 +546,88 @@ export class JsonlWatcher {
     } catch {
       return 0
     }
+  }
+
+  private consumerKey(sessionId: string, consumerId: string): string {
+    return `${sessionId}::${consumerId}`
+  }
+
+  private normalizeDirectory(dirPath: string): string {
+    const resolved = path.resolve(dirPath)
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+  }
+
+  private addDirectoryLease(dirPath: string, owner: string): void {
+    const key = this.normalizeDirectory(dirPath)
+    const existing = this.watchedDirectories.get(key)
+    if (existing) {
+      existing.owners.add(owner)
+      return
+    }
+    this.watchedDirectories.set(key, { path: dirPath, owners: new Set([owner]) })
+    this.watcher?.add(dirPath)
+  }
+
+  private releaseDirectoryOwner(owner: string): void {
+    for (const [key, directory] of this.watchedDirectories) {
+      if (!directory.owners.delete(owner) || directory.owners.size > 0) continue
+      this.watchedDirectories.delete(key)
+      void this.watcher?.unwatch(directory.path)
+    }
+  }
+
+  private releaseDirectoryOwnersForSession(sessionId: string): void {
+    const prefix = `${sessionId}::`
+    for (const directory of this.watchedDirectories.values()) {
+      for (const owner of [...directory.owners]) {
+        if (owner.startsWith(prefix)) directory.owners.delete(owner)
+      }
+    }
+    for (const [key, directory] of [...this.watchedDirectories]) {
+      if (directory.owners.size > 0) continue
+      this.watchedDirectories.delete(key)
+      void this.watcher?.unwatch(directory.path)
+    }
+  }
+
+  private findSessionConsumers(sessionIdOrUuid: string): Set<string> {
+    const consumers = new Set<string>()
+    for (const watched of this.watchedFiles.values()) {
+      if (watched.sessionId === sessionIdOrUuid || watched.filePath.includes(sessionIdOrUuid)) {
+        watched.consumers.forEach((consumer) => consumers.add(consumer))
+      }
+    }
+    if (consumers.size === 0) consumers.add(this.consumerKey(sessionIdOrUuid, 'project-discovery'))
+    return consumers
+  }
+
+  private disposeWatchedFile(filePath: string): void {
+    this.watchedFiles.delete(filePath)
+    for (const stream of this.activeStreamsByFile.get(filePath) ?? []) stream.destroy()
+    this.activeStreamsByFile.delete(filePath)
+    void this.watcher?.unwatch(filePath)
+  }
+
+  private migrateSessionConsumers(previousSessionId: string, nextSessionId: string): void {
+    const previousPrefix = `${previousSessionId}::`
+    const nextPrefix = `${nextSessionId}::`
+    for (const watched of this.watchedFiles.values()) {
+      if (watched.sessionId === previousSessionId) watched.sessionId = nextSessionId
+      for (const owner of [...watched.consumers]) {
+        if (!owner.startsWith(previousPrefix)) continue
+        watched.consumers.delete(owner)
+        watched.consumers.add(`${nextPrefix}${owner.slice(previousPrefix.length)}`)
+      }
+    }
+    for (const directory of this.watchedDirectories.values()) {
+      for (const owner of [...directory.owners]) {
+        if (!owner.startsWith(previousPrefix)) continue
+        directory.owners.delete(owner)
+        directory.owners.add(`${nextPrefix}${owner.slice(previousPrefix.length)}`)
+      }
+    }
+    console.info(
+      `[JsonlWatcher] Lease session migrated ${previousSessionId.slice(0, 8)} -> ${nextSessionId.slice(0, 8)}`,
+    )
   }
 }

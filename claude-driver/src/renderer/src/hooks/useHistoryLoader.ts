@@ -1,202 +1,394 @@
-// 使用方法：在 App.tsx 或 ProjectMonitorPage.tsx 中调用 useHistoryLoader()
+// 使用方法：const history = useHistoryLoader(projectId)
 // 编译说明：renderer 进程 browser bundle
-// 代码说明：历史 session 加载 Hook——监听项目切换，扫描 JSONL 目录构建历史 activeSessionsAtom entries
-//           核心约束：实时 session（claudeId 已在 activeSessionsAtom）不覆盖；历史 branch 关系从 forkedFrom 字段恢复
+// 代码说明：最近 1 个完整 Cluster 首屏 + 更早目录壳后台续扫 + 单 Cluster 可取消紧凑投影
 
-import { useEffect, useRef } from 'react'
-import { useStore } from 'jotai'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useAtomValue, useStore } from 'jotai'
 import { IPC } from '@shared/events/ipc-channels'
-import type { SessionHistoryMeta, Milestone } from '@shared/types/index'
-import { activeProjectIdAtom, projectByIdAtom, milestonesByProjectAtom } from '../atoms/projects.atom'
-import { activeSessionsAtom } from '../atoms/session-core.atom'
-import { registerBranch, getBranchRelation } from '../capabilities/branchRegistry'
-import { viewportModeAtom, focusedSessionIdAtom } from '../atoms/viewport.atom'
-import { lineInsertionsBySessionAtom } from '../atoms/timeline.atom'
-import type { LineInsertion } from '@shared/types/lineInsertion'
-import type { GitMark } from '@shared/types/index'
-import { replayGitMarks } from '../capabilities/gitCapability'
-import { updateSessionTokensFromFile } from '../capabilities/tokenCapability'
+import type {
+  HistoryCatalogBatch,
+  HistoryDetailsResult,
+  HistoryOpenResult,
+  HistorySessionSealResult,
+} from '@shared/types/history'
+import { projectByIdAtom } from '../atoms/projects.atom'
+import { historyHandoffPendingAtom, historyProjectsAtom } from '../atoms/history.atom'
+import { focusedSessionIdAtom, viewportModeAtom } from '../atoms/viewport.atom'
+import {
+  appendCatalogBatch,
+  beginHydration,
+  cancelHydration,
+  commitClusterProjection,
+  commitSealedSession,
+  failHydration,
+  openHistoryProject,
+  releaseClusterProjections,
+} from '../capabilities/historyCapability'
+import { releaseProjectRuntime, releaseSessionRuntime } from '../capabilities/runtimeResourceCapability'
 
-export const MAX_HISTORY_SESSIONS = 20
+const CATALOG_BATCH_CLUSTERS = 24
 
-export function useHistoryLoader(): void {
-  const store = useStore()
-  const loadingRef = useRef(false)
-
-  useEffect(() => {
-    // 订阅后续项目切换
-    const unsub = store.sub(activeProjectIdAtom, () => {
-      void loadHistory()
-    })
-    // 若当前已有活跃项目（组件挂载前就设好了，如双击导航），立即加载
-    if (store.get(activeProjectIdAtom)) {
-      void loadHistory()
+function waitForIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(() => resolve(), { timeout: 800 })
+    } else {
+      globalThis.setTimeout(resolve, 0)
     }
-    return unsub
+  })
+}
+
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => resolve())
+    else globalThis.setTimeout(resolve, 0)
+  })
+}
+
+interface DetailRequestRef {
+  detailRequestId: string
+  requestId: string
+  projectId: string
+  generation: string
+  clusterId: string
+  priority: 'hot' | 'warm'
+  interactionEpoch: number
+}
+
+export interface HistoryLoaderControl {
+  hydrateClusters: (clusterIds: string[], priority?: 'hot' | 'warm') => Promise<void>
+  releaseClusters: (clusterIds: string[]) => void
+  setInteractionBlocked: (blocked: boolean) => void
+  cancelDetailRequests: (clusterIds?: Iterable<string>) => void
+}
+
+export function useHistoryLoader(projectId: string | null): HistoryLoaderControl {
+  const store = useStore()
+  const historyProjects = useAtomValue(historyProjectsAtom)
+  const handoffPendingByProject = useAtomValue(historyHandoffPendingAtom)
+  const historyReady = Boolean(projectId && historyProjects.get(projectId))
+  const handoffKey = projectId
+    ? [...(handoffPendingByProject.get(projectId) ?? [])].sort().join(',')
+    : ''
+  const mountedRequestRef = useRef<{ projectId: string; requestId: string } | null>(null)
+  const interactionBlockedRef = useRef(false)
+  const interactionEpochRef = useRef(0)
+  const detailRequestsRef = useRef<Map<string, DetailRequestRef>>(new Map())
+  const pendingCatalogBatchRef = useRef<HistoryCatalogBatch | null>(null)
+  const interactionIdleWaitersRef = useRef<Set<() => void>>(new Set())
+
+  const cancelDetailRequests = useCallback((clusterIds?: Iterable<string>): void => {
+    const filter = clusterIds ? new Set(clusterIds) : null
+    for (const detail of [...detailRequestsRef.current.values()]) {
+      if (filter && !filter.has(detail.clusterId)) continue
+      detailRequestsRef.current.delete(detail.detailRequestId)
+      cancelHydration(store, detail.projectId, detail.generation, detail.clusterId)
+      void window.api.invoke(IPC.HISTORY_DETAILS_CANCEL, { detailRequestId: detail.detailRequestId })
+        .catch((error: unknown) => console.warn(
+          `[HistoryLoader] detail cancel failed detail=${detail.detailRequestId}:`,
+          error,
+        ))
+    }
   }, [store])
 
-  async function loadHistory(): Promise<void> {
-    if (loadingRef.current) return
-    const projectId = store.get(activeProjectIdAtom)
-    if (!projectId) return
-    loadingRef.current = true
+  const setInteractionBlocked = useCallback((blocked: boolean): void => {
+    if (interactionBlockedRef.current === blocked) return
+    interactionBlockedRef.current = blocked
+    interactionEpochRef.current += 1
+    if (blocked) {
+      cancelDetailRequests()
+    } else {
+      for (const resolve of interactionIdleWaitersRef.current) resolve()
+      interactionIdleWaitersRef.current.clear()
+    }
+    console.debug(
+      `[HistoryLoader] interaction gate=${blocked ? 'blocked' : 'open'} epoch=${interactionEpochRef.current} details=${detailRequestsRef.current.size}`,
+    )
+  }, [cancelDetailRequests])
 
+  useEffect(() => {
+    if (!projectId) return
     const project = store.get(projectByIdAtom(projectId))
     if (!project) return
+    let active = true
+    const requestId = crypto.randomUUID()
+    mountedRequestRef.current = { projectId, requestId }
+    pendingCatalogBatchRef.current = null
+    interactionBlockedRef.current = false
+    interactionEpochRef.current += 1
 
-    console.log(`[HistoryLoader] Loading history for project: ${project.path}`)
+    const waitForInteractionIdle = async (): Promise<void> => {
+      if (!interactionBlockedRef.current) return
+      await new Promise<void>((resolve) => interactionIdleWaitersRef.current.add(resolve))
+    }
 
-    // 确保目录是 git repo（项目切换时幂等执行，防止 git commit 报错）
+    console.info(`[HistoryLoader] open project=${projectId} request=${requestId}`)
     void window.api.invoke(IPC.GIT_ENSURE_REPO, { projectPath: project.path })
-      .catch((err: unknown) => console.warn('[HistoryLoader] git:ensure-repo failed:', err))
+      .catch((error: unknown) => console.warn('[HistoryLoader] git:ensure-repo failed:', error))
 
-    try {
-      const metas = await window.api.invoke(IPC.PROJECT_HISTORY_SCAN, {
+    const load = async (): Promise<void> => {
+      const result = await window.api.invoke(IPC.HISTORY_OPEN_PROJECT, {
+        projectId,
         projectPath: project.path,
-        maxSessions: MAX_HISTORY_SESSIONS,
-      }) as SessionHistoryMeta[]
-
-      if (!metas.length) {
-        console.log('[HistoryLoader] No history sessions found')
+        requestId,
+      }) as HistoryOpenResult
+      if (!active || mountedRequestRef.current?.requestId !== requestId) return
+      if (!result.ok) {
+        if (result.errorCode !== 'HISTORY_CANCELLED') {
+          console.error(`[HistoryLoader] open failed code=${result.errorCode}: ${result.error}`)
+        }
         return
       }
 
-      // ── 写入 activeSessionsAtom（只写不存在的 entry，防覆盖实时 session）─────
-      store.set(activeSessionsAtom, (prev) => {
-        const next = new Map(prev)
-        for (const meta of metas) {
-          if (next.has(meta.claudeId)) {
-            console.log(`[HistoryLoader] Skip ${meta.claudeId.slice(0, 8)}: already in activeSessionsAtom (live session)`)
-            continue
+      openHistoryProject(store, projectId, project.path, result)
+      if (result.latestCluster) {
+        store.set(focusedSessionIdAtom, result.latestCluster.rootSessionId)
+        store.set(viewportModeAtom, 'focus')
+      }
+      console.info(`[HistoryLoader] first cluster ready project=${projectId} totalClusters=${result.totalClusters}`)
+
+      while (active && mountedRequestRef.current?.requestId === requestId) {
+        if (!store.get(historyProjectsAtom).get(projectId)?.continuation) break
+        await waitForIdle()
+        if (!active) break
+        const state = store.get(historyProjectsAtom).get(projectId)
+        if (!state?.continuation || state.requestId !== requestId) break
+        const batch = await window.api.invoke(IPC.HISTORY_CATALOG_CONTINUE, {
+          projectId,
+          projectPath: project.path,
+          requestId,
+          continuation: state.continuation,
+          limit: CATALOG_BATCH_CLUSTERS,
+        }) as HistoryCatalogBatch
+        if (!active) break
+        if (!batch.ok) {
+          if (batch.errorCode !== 'HISTORY_CANCELLED') {
+            console.warn(`[HistoryLoader] catalog continue stopped code=${batch.errorCode}: ${batch.error}`)
           }
-          next.set(meta.claudeId, {
-            id: meta.claudeId,        // 无 ptyId，用 claudeId 占位
-            claudeId: meta.claudeId,
-            projectId: project.id,
-            status: 'Completed',
-            currentModel: null,
-            tokenUsage: { current: null, max: null, usedPercentage: null },
-            transcriptPath: meta.transcriptPath,
-            cwd: meta.cwd,
-            startedAt: meta.startedAt ?? meta.mtime,    // 优先用 JSONL 内真实启动时间戳
-            endedAt: meta.mtime,
-            worktreePath: null,
-          })
+          break
         }
+        if (interactionBlockedRef.current) {
+          // 动画期最多保留一个轻量目录 batch；正文投影从不缓冲。
+          pendingCatalogBatchRef.current = batch
+          while (active && interactionBlockedRef.current) await waitForInteractionIdle()
+          if (!active) break
+          if (pendingCatalogBatchRef.current === batch) pendingCatalogBatchRef.current = null
+        }
+        appendCatalogBatch(store, projectId, batch)
+        console.debug(`[HistoryLoader] catalog batch=${batch.clusters.length} hasMore=${batch.continuation !== null}`)
+      }
+    }
+    void load().catch((error: unknown) => console.error('[HistoryLoader] open task failed:', error))
+
+    return () => {
+      active = false
+      const activeRequest = mountedRequestRef.current?.projectId === projectId
+        ? mountedRequestRef.current
+        : { projectId, requestId }
+      if (mountedRequestRef.current?.projectId === projectId) mountedRequestRef.current = null
+      pendingCatalogBatchRef.current = null
+      for (const resolve of interactionIdleWaitersRef.current) resolve()
+      interactionIdleWaitersRef.current.clear()
+      cancelDetailRequests()
+      interactionBlockedRef.current = false
+      void window.api.invoke(IPC.HISTORY_REQUEST_CANCEL, { requestId: activeRequest.requestId })
+        .catch((error: unknown) => console.warn('[HistoryLoader] cancel failed:', error))
+      // 统一释放历史正文之外的 frame height、atomFamily 与实时运行态缓存。
+      // running/paused Session 的注册表和 PTY 可见性会保留，重进项目后由 JSONL 全量补读恢复正文。
+      releaseProjectRuntime(store, projectId, { reason: 'history-loader-unmount' })
+      void window.api.invoke(IPC.RUNTIME_RESOURCE_SNAPSHOT, {
+        reason: `project-unmount:${projectId}`,
+      }).catch((error: unknown) => console.warn('[HistoryLoader] resource snapshot failed:', error))
+    }
+  }, [cancelDetailRequests, projectId, store])
+
+  // 已结束实时 Session 的紧凑历史交接。独立于项目 mount effect，避免为刷新目录先清空画布。
+  useEffect(() => {
+    if (!projectId || !historyReady || !handoffKey) return
+    const project = store.get(projectByIdAtom(projectId))
+    const state = store.get(historyProjectsAtom).get(projectId)
+    if (!project || !state) return
+    const pendingIds = new Set(handoffKey.split(',').filter(Boolean))
+    const targetSessionId = [...pendingIds][0]
+    if (!targetSessionId) return
+
+    let active = true
+    let committed = false
+    const requestId = crypto.randomUUID()
+    console.info(
+      `[HistoryLoader] seal start project=${projectId} session=${targetSessionId.slice(0, 8)} request=${requestId}`,
+    )
+
+    const seal = async (): Promise<void> => {
+      const result = await window.api.invoke(IPC.HISTORY_SESSION_SEAL, {
+        projectId,
+        projectPath: project.path,
+        sessionId: targetSessionId,
+        requestId,
+        knownClusterIds: state.clusters.map((cluster) => cluster.clusterId),
+        continuation: state.continuation,
+      }) as HistorySessionSealResult
+      if (!active) return
+      if (!result.ok) {
+        if (result.errorCode !== 'HISTORY_CANCELLED') {
+          console.warn(
+            `[HistoryLoader] seal failed project=${projectId} session=${targetSessionId.slice(0, 8)} code=${result.errorCode}: ${result.error}`,
+          )
+        }
+        return
+      }
+      cancelDetailRequests()
+      if (!commitSealedSession(store, projectId, result)) return
+      committed = true
+      mountedRequestRef.current = { projectId, requestId: result.requestId }
+
+      const sealedIds = new Set(result.projection.sessions.map((session) => session.sessionId))
+      for (const sessionId of pendingIds) {
+        if (!sealedIds.has(sessionId)) continue
+        releaseSessionRuntime(store, sessionId, { mode: 'handoff', reason: 'history-seal-commit' })
+      }
+
+      // seal 替换了 main snapshot/request；继续沿同一个内部游标补齐更早目录壳。
+      while (active && mountedRequestRef.current?.requestId === result.requestId) {
+        const current = store.get(historyProjectsAtom).get(projectId)
+        if (!current?.continuation) break
+        await waitForIdle()
+        if (!active || mountedRequestRef.current?.requestId !== result.requestId) break
+        const batch = await window.api.invoke(IPC.HISTORY_CATALOG_CONTINUE, {
+          projectId,
+          projectPath: project.path,
+          requestId: result.requestId,
+          continuation: current.continuation,
+          limit: CATALOG_BATCH_CLUSTERS,
+        }) as HistoryCatalogBatch
+        if (!active || !batch.ok) break
+        appendCatalogBatch(store, projectId, batch)
+      }
+
+      store.set(historyHandoffPendingAtom, (prev) => {
+        const current = prev.get(projectId)
+        if (!current) return prev
+        const remaining = new Set(current)
+        sealedIds.forEach((sessionId) => remaining.delete(sessionId))
+        const next = new Map(prev)
+        if (remaining.size > 0) next.set(projectId, remaining)
+        else next.delete(projectId)
         return next
       })
+      console.info(
+        `[HistoryLoader] seal complete project=${projectId} cluster=${result.cluster.clusterId.slice(0, 8)} sessions=${result.projection.sessions.length}`,
+      )
+    }
+    void seal().catch((error: unknown) => {
+      console.error('[HistoryLoader] seal task failed:', error)
+    })
 
-      // ── 先回放插入线（必须先于 branch 关系注册，确保 branch 类型插入线已在 atom 里可查询）──
-      const metasWithInsertions = metas.filter((m) => m.insertionsPath)
-      console.log(`[HistoryLoader] ${metasWithInsertions.length}/${metas.length} sessions have insertions file`)
-      for (const meta of metasWithInsertions) {
-        console.log(`[HistoryLoader] Loading insertions for ${meta.claudeId.slice(0, 8)} from ${meta.insertionsPath}`)
-        try {
-          const result = await window.api.invoke(IPC.INSERTIONS_LOAD, {
-            insertionsPath: meta.insertionsPath,
-          }) as { ok: boolean; insertions: LineInsertion[] }
-          console.log(`[HistoryLoader] INSERTIONS_LOAD result ok=${result.ok} count=${result.insertions?.length ?? 0} for ${meta.claudeId.slice(0, 8)}`)
-          if (result.ok && result.insertions.length > 0) {
-            let added = 0
-            result.insertions.forEach((ins) => {
-              store.set(lineInsertionsBySessionAtom(meta.claudeId), (prev) => {
-                if (prev.some((p) => p.id === ins.id)) return prev
-                added++
-                return [...prev, ins]
-              })
-            })
-            console.log(`[HistoryLoader] Replayed ${result.insertions.length} insertions (${added} new) for claudeId=${meta.claudeId.slice(0, 8)}`)
-          }
-        } catch (err) {
-          console.warn(`[HistoryLoader] insertions:load failed for ${meta.claudeId.slice(0, 8)}:`, err)
-        }
+    return () => {
+      active = false
+      if (!committed) {
+        void window.api.invoke(IPC.HISTORY_REQUEST_CANCEL, { requestId })
+          .catch((error: unknown) => console.warn('[HistoryLoader] seal cancel failed:', error))
       }
+    }
+  }, [cancelDetailRequests, handoffKey, historyReady, projectId, store])
 
-      // ── 回放 Milestones ───────────────────────────────────────────────────
-      const metasWithMilestones = metas.filter((m) => m.milestonesPath)
-      console.log(`[HistoryLoader] ${metasWithMilestones.length}/${metas.length} sessions have milestones file`)
-      for (const meta of metasWithMilestones) {
-        try {
-          const result = await window.api.invoke(IPC.MILESTONES_LOAD, {
-            milestonesPath: meta.milestonesPath,
-          }) as { ok: boolean; milestones: Milestone[] }
-          if (result.ok && result.milestones.length > 0) {
-            for (const m of result.milestones) {
-              store.set(milestonesByProjectAtom(m.projectId), (prev) => {
-                if (prev.some((p) => p.id === m.id && p.sessionId === m.sessionId)) return prev
-                return [...prev, m]
-              })
-            }
-            console.log(`[HistoryLoader] Replayed ${result.milestones.length} milestones for claudeId=${meta.claudeId.slice(0, 8)}`)
-          }
-        } catch (err) {
-          console.warn(`[HistoryLoader] milestones:load failed for ${meta.claudeId.slice(0, 8)}:`, err)
-        }
+  const hydrateClusters = useCallback(async (
+    clusterIds: string[],
+    priority: 'hot' | 'warm' = 'hot',
+  ): Promise<void> => {
+    if (!projectId || clusterIds.length === 0 || interactionBlockedRef.current) return
+    const project = store.get(projectByIdAtom(projectId))
+    if (!project) return
+
+    for (const clusterId of [...new Set(clusterIds)]) {
+      if (interactionBlockedRef.current) break
+      const state = store.get(historyProjectsAtom).get(projectId)
+      if (!state || !beginHydration(store, projectId, state.generation, clusterId)) continue
+      const detailRequestId = crypto.randomUUID()
+      const detail: DetailRequestRef = {
+        detailRequestId,
+        requestId: state.requestId,
+        projectId,
+        generation: state.generation,
+        clusterId,
+        priority,
+        interactionEpoch: interactionEpochRef.current,
       }
+      detailRequestsRef.current.set(detailRequestId, detail)
+      console.info(
+        `[HistoryLoader] hydrate start request=${state.requestId} detail=${detailRequestId} priority=${priority} cluster=${clusterId.slice(0, 8)} epoch=${detail.interactionEpoch}`,
+      )
 
-      // ── 回放 Git 标记（isGitted / commitHash）────────────────────────────
-      const metasWithGitMarks = metas.filter((m) => m.gitMarksPath)
-      console.log(`[HistoryLoader] ${metasWithGitMarks.length}/${metas.length} sessions have git-marks file`)
-      for (const meta of metasWithGitMarks) {
-        try {
-          const result = await window.api.invoke(IPC.GIT_MARKS_LOAD, {
-            gitMarksPath: meta.gitMarksPath,
-          }) as { ok: boolean; marks: GitMark[] }
-          if (result.ok && result.marks.length > 0) {
-            replayGitMarks(store, meta.claudeId, result.marks)
-          }
-        } catch (err) {
-          console.warn(`[HistoryLoader] git:marks-load failed for ${meta.claudeId.slice(0, 8)}:`, err)
-        }
-      }
-
-      // ── 恢复历史 branch 关系（forkedFrom → sessionRelationsAtom）──────────
-      // triggerYOffset 优先从已加载的 branch 插入线读取（持久化的帧高快照）
-      // fallback：父 session 已 Completed，帧高静态，用当前高度计算
-      for (const meta of metas) {
-        if (!meta.forkedFrom) continue
-        if (getBranchRelation(store, meta.claudeId)) {
-          console.log(`[HistoryLoader] Skip branch relation for ${meta.claudeId.slice(0,8)}: already registered (live)`)
+      try {
+        const result = await window.api.invoke(IPC.HISTORY_DETAILS_LOAD, {
+          projectId,
+          projectPath: project.path,
+          requestId: state.requestId,
+          detailRequestId,
+          generation: state.generation,
+          clusterId,
+        }) as HistoryDetailsResult
+        if (
+          detailRequestsRef.current.get(detailRequestId) !== detail
+          || interactionBlockedRef.current
+          || interactionEpochRef.current !== detail.interactionEpoch
+        ) {
+          console.debug(`[HistoryLoader] hydrate late result discarded detail=${detailRequestId}`)
           continue
         }
-        const triggerNodeIndex = meta.branchTriggerIndex ?? 0
-        const parentId = meta.forkedFrom.sessionId
-
-        // 从父 session 的 insertions 里找对应这个子 session 的 branch 插入线
-        const branchInsertionId = `${parentId}-branch-${meta.claudeId}`
-        const parentInsertions = store.get(lineInsertionsBySessionAtom(parentId))
-        const branchIns = parentInsertions.find((ins) => ins.id === branchInsertionId)
-        const triggerYOffset = branchIns?.triggerYOffset
-
-        registerBranch(store, meta.claudeId, parentId, {
-          triggerNodeIndex,
-          inheritedNodeCount: 0,
-          triggerYOffset,
-        })
-        console.log(`[HistoryLoader] Registered branch ${meta.claudeId.slice(0,8)} → parent ${parentId.slice(0,8)} triggerIdx=${triggerNodeIndex} triggerYOffset=${triggerYOffset} (fromIns=${!!branchIns})`)
-      }
-
-      // ── Token 扫描：并发扫描所有历史 session 的 JSONL，不阻塞主流程 ──────────
-      const metasWithTranscript = metas.filter((m) => m.transcriptPath)
-      console.log(`[HistoryLoader] Starting token scan for ${metasWithTranscript.length} sessions`)
-      void Promise.allSettled(
-        metasWithTranscript.map((meta) =>
-          updateSessionTokensFromFile(store, meta.claudeId, meta.transcriptPath)
+        detailRequestsRef.current.delete(detailRequestId)
+        if (!result.ok) {
+          if (result.errorCode === 'HISTORY_CANCELLED') {
+            cancelHydration(store, projectId, state.generation, clusterId)
+          } else {
+            failHydration(store, projectId, state.generation, clusterId, result.error)
+          }
+          continue
+        }
+        if (
+          result.requestId !== detail.requestId
+          || result.detailRequestId !== detailRequestId
+          || result.generation !== detail.generation
+          || result.projection.clusterId !== clusterId
+        ) {
+          cancelHydration(store, projectId, state.generation, clusterId)
+          console.warn(`[HistoryLoader] hydrate identity mismatch detail=${detailRequestId}`)
+          continue
+        }
+        const committed = commitClusterProjection(
+          store,
+          projectId,
+          result.requestId,
+          result.generation,
+          result.projection,
         )
-      )
-
-      // ── 视口跳转：fitView 到 mtime 最新的 session（metas 已按升序排列）─────
-      const latestMeta = metas[metas.length - 1]
-      store.set(focusedSessionIdAtom, latestMeta.claudeId)
-      store.set(viewportModeAtom, 'focus')
-
-      console.log(
-        `[HistoryLoader] Loaded ${metas.length} history sessions, focusing ${latestMeta.claudeId.slice(0, 8)}`
-      )
-    } catch (err) {
-      console.error('[HistoryLoader] Failed to load history:', err)
-    } finally {
-      loadingRef.current = false
+        if (!committed) cancelHydration(store, projectId, state.generation, clusterId)
+        await nextAnimationFrame()
+      } catch (error) {
+        if (detailRequestsRef.current.get(detailRequestId) === detail) {
+          detailRequestsRef.current.delete(detailRequestId)
+          if (!interactionBlockedRef.current) {
+            failHydration(store, projectId, state.generation, clusterId, String(error))
+          }
+        }
+      } finally {
+        if (detailRequestsRef.current.get(detailRequestId) === detail) {
+          detailRequestsRef.current.delete(detailRequestId)
+        }
+      }
     }
-  }
+  }, [projectId, store])
+
+  const releaseClusters = useCallback((clusterIds: string[]): void => {
+    if (!projectId || clusterIds.length === 0 || interactionBlockedRef.current) return
+    console.info(`[HistoryLoader] release clusters=${clusterIds.length}`)
+    releaseClusterProjections(store, projectId, clusterIds)
+  }, [projectId, store])
+
+  return useMemo(() => ({
+    hydrateClusters,
+    releaseClusters,
+    setInteractionBlocked,
+    cancelDetailRequests,
+  }), [hydrateClusters, releaseClusters, setInteractionBlocked, cancelDetailRequests])
 }

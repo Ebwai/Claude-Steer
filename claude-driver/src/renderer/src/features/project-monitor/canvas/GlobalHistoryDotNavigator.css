@@ -1,0 +1,77 @@
+/* 代码说明：全局主线 Agent 点导航——固定 16px 轨道、8px 可见点、无重叠点击区 */
+
+.ghdn-track {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 20;
+  width: 16px;
+  height: 100%;
+  user-select: none;
+}
+
+.ghdn-rail {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  bottom: 4px;
+  left: 0;
+}
+
+.ghdn-rail::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  content: '';
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.ghdn-hit-target {
+  position: absolute;
+  right: 0;
+  left: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ghdn-dot {
+  position: absolute;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+  transform: translate(-50%, -50%);
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+  pointer-events: none;
+}
+
+.ghdn-hit-target:hover .ghdn-dot,
+.ghdn-hit-target:focus-visible .ghdn-dot {
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+.ghdn-hit-target-active .ghdn-dot,
+.ghdn-hit-target-active:hover .ghdn-dot,
+.ghdn-hit-target-active:focus-visible .ghdn-dot {
+  background: rgba(53, 201, 138, 0.92);
+  box-shadow:
+    0 0 0 2px rgba(53, 201, 138, 0.28),
+    0 0 8px rgba(53, 201, 138, 0.45);
+}

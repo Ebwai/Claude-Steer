@@ -62,6 +62,8 @@ export const IPC = {
   SHELL_OPEN_PATH: 'shell:open-path',
   /** 开始监听 JSONL 文件（历史 readFromStart=true / 实时 readFromStart=false） */
   JSONL_WATCH: 'jsonl:watch',
+  /** 释放当前 ProcessTimeline 持有的 JSONL watcher 租约 */
+  JSONL_UNWATCH: 'jsonl:unwatch',
   /** Main → Renderer 批量推送历史 JSONL 记录 */
   JSONL_RECORDS: 'jsonl:records',
   /** Main → Renderer 推送单条实时 JSONL 记录 */
@@ -92,6 +94,24 @@ export const IPC = {
   JSONL_BRANCH_SNAPSHOT: 'jsonl:branch-snapshot',
   /** 扫描项目历史 session 元数据（renderer → main 请求） */
   PROJECT_HISTORY_SCAN: 'project:history-scan',
+  /** 打开项目历史：返回最近 1 个完整 Cluster 与后台续扫位置 */
+  HISTORY_OPEN_PROJECT: 'history:open-project',
+  /** 按 opaque 后台续扫位置获取更早的轻量 Cluster 壳 */
+  HISTORY_CATALOG_CONTINUE: 'history:catalog-continue',
+  /** 水合单个 Cluster 的紧凑 JSONL、sidecar 与 Subagent 投影 */
+  HISTORY_DETAILS_LOAD: 'history:details-load',
+  /** 将已结束实时 Session 从落盘 JSONL 接管为紧凑历史投影 */
+  HISTORY_SESSION_SEAL: 'history:session-seal',
+  /** 按 detailRequestId 取消单个历史详情投影，不销毁目录 snapshot */
+  HISTORY_DETAILS_CANCEL: 'history:details-cancel',
+  /** 取消过期的历史目录或 Token 请求 */
+  HISTORY_REQUEST_CANCEL: 'history:request-cancel',
+  /** 删除主线 Cluster 或单个 Branch 会话包 */
+  HISTORY_DELETE: 'history:delete',
+  /** 独立扫描 Token 统计库存，不创建历史工作框 */
+  HISTORY_TOKEN_INVENTORY: 'history:token-inventory',
+  /** 获取 main/history/watcher 与 Electron 各进程的资源计数快照 */
+  RUNTIME_RESOURCE_SNAPSHOT: 'runtime:resource-snapshot',
   /** 追加一条完整插入线到 <claudeId>.insertions.jsonl */
   INSERTION_APPEND: 'insertion:append',
   /** 追加一条补丁行（id + 变更字段）到 <claudeId>.insertions.jsonl */

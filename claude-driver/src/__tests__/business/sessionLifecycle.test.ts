@@ -67,6 +67,37 @@ describe('BL-2: handleSessionStart', () => {
     expect(sess?.id).toBe('c-ext')  // 无 ptyId 时用 claudeId 占位
     expect(store.get(ptySessionIdsAtom).has('c-ext')).toBe(true)
   })
+
+  it('Hook 到达时把早期 PTY 占位原子迁移为唯一真实会话', () => {
+    createSession(store, 'p1', makeSession({
+      id: 'p1',
+      claudeId: 'p1',
+      projectId: 'proj-x',
+      isPtyPlaceholder: true,
+    }))
+    addToRealtime(store, 'p1')
+    store.set(pendingPtyStartsAtom, new Map([['/proj', { ptyId: 'p1', projectId: 'proj-x' }]]))
+
+    lifecycle.handleSessionStart({
+      sessionId: 'c1',
+      cwd: '/proj',
+      transcriptPath: '/t.jsonl',
+      receivedAt: 2000,
+    })
+
+    const sessions = store.get(activeSessionsAtom)
+    expect(sessions.size).toBe(1)
+    expect(sessions.has('p1')).toBe(false)
+    expect(sessions.get('c1')).toMatchObject({
+      id: 'p1',
+      claudeId: 'c1',
+      projectId: 'proj-x',
+      transcriptPath: '/t.jsonl',
+      isPtyPlaceholder: false,
+    })
+    expect(store.get(ptySessionIdsAtom)).toEqual(new Set(['c1']))
+    expect(store.get(pendingPtyStartsAtom).has('/proj')).toBe(false)
+  })
 })
 
 // ── SessionEnd ───────────────────────────────────────────────────────────────

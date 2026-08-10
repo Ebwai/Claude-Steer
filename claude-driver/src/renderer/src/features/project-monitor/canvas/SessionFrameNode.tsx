@@ -8,11 +8,19 @@ import React, { useEffect, useRef, useCallback } from 'react'
 import { Handle, Position, useReactFlow, useUpdateNodeInternals } from '@xyflow/react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { IPC } from '@shared/events/ipc-channels'
+import type { Session } from '@shared/types/index'
+import type { HistoryDetailsState } from '@shared/types/history'
 import { activeSessionsAtom, sessionFrameHeightsAtom, sessionRelationsAtom } from '../../../atoms/sessions.atom'
 import { sessionTokensAtom } from '../../../atoms/stats.atom'
+import { tokenInventoryAtom } from '../../../atoms/token-inventory.atom'
 import { projectByIdAtom, milestonesByProjectAtom } from '../../../atoms/projects.atom'
 import { FRAME_HEADER_HEIGHT, computeFrozenOffset } from '../../../hooks/useSessionFrameLayout'
+import type { HistoryLayoutMeasurementGate } from '../../../hooks/historyLayoutMeasurementGate'
 import { allFrameHeightsAtom } from '../../../atoms/agent-block.atom'
+import {
+  buildSessionResumePayload,
+  resolveSessionFrameProjectId,
+} from '../../../capabilities/sessionResumeCapability'
 import { useT } from '../../../i18n'
 import ProcessTimeline from '../ProcessTimeline'
 import './SessionFrameNode.css'
@@ -20,8 +28,18 @@ import './SessionFrameNode.css'
 // ── 节点 data 类型 ─────────────────────────────────────────────────────────
 
 export interface SessionFrameData extends Record<string, unknown> {
+  projectId: string   // 当前监管画布所属项目；恢复历史会话时作为权威 projectId
   sessionId: string   // claudeId（Map key，稳定渲染标识 = node.id）
-  ptyId: string       // 当前 PTY UUID（每次 resume 会变；SESSION_STOP/INPUT/TERM_WINDOW_OPEN 使用此值）
+  ptyId?: string      // 当前 PTY UUID（每次 resume 会变；历史 shell 无 PTY）
+  session: Session
+  source: 'realtime' | 'history'
+  detailsState: HistoryDetailsState
+  clusterId: string
+  deleteDisabled: boolean
+  isDeleting: boolean
+  /** 稳定 ref gate：相机移动/settling 期间冻结高度提交，但不改变 node.data 引用。 */
+  layoutMeasurementGate: HistoryLayoutMeasurementGate
+  onRequestDelete?: (sessionId: string) => void
   agentLabel: string
   agentColor: string   // CSS 颜色值，如 '#35C98A'
   isExpanded: boolean
@@ -30,8 +48,8 @@ export interface SessionFrameData extends Record<string, unknown> {
 
 // ── 运行时长格式化 ─────────────────────────────────────────────────────────
 
-function formatDuration(startedAt: number): string {
-  const elapsed = Math.floor((Date.now() - startedAt) / 1000)
+function formatDuration(startedAt: number, endedAt: number | null): string {
+  const elapsed = Math.max(0, Math.floor(((endedAt ?? Date.now()) - startedAt) / 1000))
   if (elapsed < 60) return `${elapsed}s`
   const m = Math.floor(elapsed / 60)
   if (m < 60) return `${m}min`
@@ -56,32 +74,33 @@ interface SessionFrameNodeProps {
 
 function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.JSX.Element {
   const { t } = useT()
-  const { sessionId, ptyId, agentLabel, agentColor } = data
+  const { sessionId, ptyId, agentLabel, agentColor, source, detailsState } = data
   const activeSessions = useAtomValue(activeSessionsAtom)
-  const session = activeSessions.get(sessionId)
+  const session = activeSessions.get(sessionId) ?? data.session
   const setHeight = useSetAtom(sessionFrameHeightsAtom(sessionId))
   const setAllHeights = useSetAtom(allFrameHeightsAtom)
-  const allHeights = useAtomValue(allFrameHeightsAtom)
   const { updateNodeData } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
   const relationsMap = useAtomValue(sessionRelationsAtom)
-  const project = useAtomValue(projectByIdAtom(session?.projectId ?? ''))
+  const sessionProjectId = resolveSessionFrameProjectId(data.projectId, session?.projectId)
+  const project = useAtomValue(projectByIdAtom(sessionProjectId))
   // childBranches：sessionRelationsAtom.parentSessionId 现在存 claudeId（= sessionId）
   const childBranches = Array.from(relationsMap.entries())
     .filter(([, rel]) => rel.type === 'branch' && rel.parentSessionId === sessionId)
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const startedAt = session?.startedAt ?? Date.now()
+  const lastMeasuredHeightRef = useRef<number | null>(null)
+  const pendingMeasuredHeightRef = useRef<number | null>(null)
+  const startedAt = session?.startedAt ?? 0
   const sessionTokens = useAtomValue(sessionTokensAtom(sessionId))
-  const totalConsumedTokens = sessionTokens.inputTokens + sessionTokens.outputTokens +
-    sessionTokens.cacheCreationTokens + sessionTokens.cacheReadTokens
+  const tokenInventory = useAtomValue(tokenInventoryAtom).get(sessionId)
+  const displayedTokens = source === 'history' && tokenInventory ? tokenInventory.usage : sessionTokens
+  const totalConsumedTokens = displayedTokens.inputTokens + displayedTokens.outputTokens +
+    displayedTokens.cacheCreationTokens + displayedTokens.cacheReadTokens
 
   // ── Milestone badges ───────────────────────────────────────────────────────
-  const allMilestones = useAtomValue(milestonesByProjectAtom(session?.projectId ?? ''))
+  const allMilestones = useAtomValue(milestonesByProjectAtom(sessionProjectId))
   const sessionMilestones = allMilestones.filter((m) => m.sessionId === sessionId)
-  if (allMilestones.length > 0) {
-    console.log(`[PlanIndicator] SessionFrameNode ${sessionId}: allMilestones=${allMilestones.length} sessionMilestones=${sessionMilestones.length}`)
-  }
 
   // ── ResizeObserver：监听框高度变化，通知 ReactFlow 重新测量节点尺寸 ────────
   // updateNodeData  → 更新 node.data.estimatedHeight（供布局 hook 使用）
@@ -91,23 +110,43 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    const gate = data.layoutMeasurementGate
+    const commitMeasuredHeight = (h: number): void => {
+      if (lastMeasuredHeightRef.current !== null && Math.abs(lastMeasuredHeightRef.current - h) < 0.5) return
+      lastMeasuredHeightRef.current = h
+      setHeight(h)
+      // 同步写入全量 Map atom，使 ProcessLineCanvas 订阅到变化触发布局重算。
+      setAllHeights((prev) => {
+        const next = new Map(prev)
+        next.set(sessionId, h)
+        return next
+      })
+      updateNodeData(id, { estimatedHeight: h })
+      updateNodeInternals(id)
+    }
+    const flushPendingHeight = (): void => {
+      const pendingHeight = pendingMeasuredHeightRef.current
+      if (pendingHeight === null) return
+      pendingMeasuredHeightRef.current = null
+      commitMeasuredHeight(pendingHeight)
+    }
+    gate.unblockedListeners.add(flushPendingHeight)
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const h = entry.contentRect.height
-        setHeight(h)
-        // 同步写入全量 Map atom，使 ProcessLineCanvas 订阅到变化触发布局重算
-        setAllHeights((prev) => {
-          const next = new Map(prev)
-          next.set(sessionId, h)
-          return next
-        })
-        updateNodeData(id, { estimatedHeight: h })
-        updateNodeInternals(id)
+        if (gate.blocked) {
+          pendingMeasuredHeightRef.current = h
+          continue
+        }
+        commitMeasuredHeight(h)
       }
     })
     ro.observe(el)
-    return () => ro.disconnect()
-  }, [id, sessionId, setHeight, setAllHeights, updateNodeData, updateNodeInternals])
+    return () => {
+      gate.unblockedListeners.delete(flushPendingHeight)
+      ro.disconnect()
+    }
+  }, [data.layoutMeasurementGate, id, sessionId, setHeight, setAllHeights, updateNodeData, updateNodeInternals])
 
   // ── 状态点颜色 ─────────────────────────────────────────────────────────
   const statusColor = session?.status === 'Running'
@@ -127,17 +166,17 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
   }, [ptyId])
 
   const handleResume = useCallback(async () => {
-    console.log(`[SessionFrameNode] handleResume: ptyId=${ptyId} projectId=${session?.projectId} project=${project?.id ?? 'null'} sessionId=${sessionId}`)
-    if (!ptyId || !project) return
+    console.log(`[SessionFrameNode] handleResume: ptyId=${ptyId} projectId=${sessionProjectId || 'null'} project=${project?.id ?? 'null'} sessionId=${sessionId}`)
+    // 历史框按设计没有 ptyId；SESSION_RESUME 会创建新的 PTY，只需要稳定的 Claude sessionId。
+    const resumePayload = buildSessionResumePayload(sessionId, project)
+    if (!resumePayload) {
+      console.warn(`[SessionFrameNode] handleResume blocked: project not found for session=${sessionId} projectId=${sessionProjectId || 'null'}`)
+      return
+    }
     console.log(`[SFN:WIN] handleResume BEFORE: outerW=${window.outerWidth} outerH=${window.outerHeight} innerW=${window.innerWidth} innerH=${window.innerHeight}`)
     // sessionId = claudeId，直接作为 resumeSessionId 传入（claude -r <claudeId>）
     try {
-      const result = await window.api.invoke(IPC.SESSION_RESUME, {
-        projectId: project.id,
-        projectPath: project.path,
-        resumeSessionId: sessionId,
-        permissionMode: 'acceptEdits',
-      }) as { ok: boolean; sessionId?: string }
+      const result = await window.api.invoke(IPC.SESSION_RESUME, resumePayload) as { ok: boolean; sessionId?: string }
       console.log(`[SFN:WIN] handleResume AFTER: outerW=${window.outerWidth} outerH=${window.outerHeight} innerW=${window.innerWidth} innerH=${window.innerHeight}`)
 
       if (result.ok && result.sessionId) {
@@ -153,7 +192,7 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
     } catch (err) {
       console.error('[SessionFrameNode] SESSION_RESUME failed:', err)
     }
-  }, [ptyId, sessionId, project, agentLabel])
+  }, [ptyId, sessionId, sessionProjectId, project, agentLabel, t])
 
   const handleOpenTerminal = useCallback(() => {
     console.log(`[SessionFrameNode] handleOpenTerminal: ptyId=${ptyId} isCompleted=${isCompleted}`)
@@ -162,13 +201,18 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
       sessionId: ptyId,
       title: t('projectMonitor.canvas.terminalTitle', { label: agentLabel }),
     }).catch((err: unknown) => console.error('[SessionFrameNode] TERM_WINDOW_OPEN failed:', err))
-  }, [ptyId, agentLabel])
+  }, [ptyId, isCompleted, agentLabel, t])
 
   return (
     <div
       ref={containerRef}
       className={`sfn-frame ${selected ? 'sfn-frame-selected' : ''}`}
-      style={{ borderColor: `${agentColor}60` }}
+      style={{
+        borderColor: `${agentColor}60`,
+        minHeight: source === 'history' && detailsState !== 'resident'
+          ? data.estimatedHeight
+          : undefined,
+      }}
     >
       {/* 基础 handle（@xyflow 内部要求至少有一个） */}
       <Handle type="target" position={Position.Top} id="default-target" style={{ opacity: 0 }} />
@@ -178,7 +222,7 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
           优先级：triggerYOffset（旧数据兼容）→ computeFrozenOffset（帧底端）→ 绝对 fallback */}
       {childBranches.map(([childId, rel]) => {
         const handlePos = (rel.side ?? 'right') === 'left' ? Position.Left : Position.Right
-        const parentH = allHeights.get(sessionId)
+        const parentH = data.estimatedHeight
         const srcTop = rel.triggerYOffset
           ?? (parentH !== undefined ? computeFrozenOffset(parentH) : undefined)
           ?? FRAME_HEADER_HEIGHT + 300  // 绝对 fallback：header + 300px 内容偏移
@@ -232,7 +276,25 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
               {formatTokens(totalConsumedTokens)}
             </span>
           )}
-          <span className="sfn-duration">{formatDuration(startedAt)}</span>
+          <span className="sfn-duration">{formatDuration(startedAt, session?.endedAt ?? null)}</span>
+          {source === 'history' && (
+            <button
+              type="button"
+              className="sfn-delete-btn"
+              disabled={data.deleteDisabled || data.isDeleting}
+              title={data.deleteDisabled
+                ? t('projectMonitor.canvas.historyDeleteRunning')
+                : t('projectMonitor.canvas.historyDeleteAria')}
+              aria-label={t('projectMonitor.canvas.historyDeleteAria')}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                data.onRequestDelete?.(sessionId)
+              }}
+            >
+              {data.isDeleting ? '…' : '×'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -256,17 +318,29 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
             </div>
           )
         })}
-        <ProcessTimeline
-          sessionId={sessionId}
-          embedded={true}
-        />
+        {source === 'history' && detailsState !== 'resident' ? (
+          <div className={`sfn-history-shell sfn-history-shell-${detailsState}`}>
+            {detailsState === 'hydrating'
+              ? t('projectMonitor.canvas.historyLoading')
+              : detailsState === 'error'
+                ? t('projectMonitor.canvas.historyLoadFailed')
+                : t('projectMonitor.canvas.historyShell')}
+          </div>
+        ) : (
+          <ProcessTimeline
+            sessionId={sessionId}
+            embedded={true}
+            sessionOverride={session}
+            source={source}
+          />
+        )}
       </div>
 
       {/* ── 底部操作区 ── */}
       <div className="sfn-footer">
         {/* 中间位置：token 消耗统计 */}
         {totalConsumedTokens > 0 && (
-          <span className="sfn-footer-tokens" title={`input: ${sessionTokens.inputTokens} output: ${sessionTokens.outputTokens} cache_create: ${sessionTokens.cacheCreationTokens} cache_read: ${sessionTokens.cacheReadTokens}`}>
+          <span className="sfn-footer-tokens" title={`input: ${displayedTokens.inputTokens} output: ${displayedTokens.outputTokens} cache_create: ${displayedTokens.cacheCreationTokens} cache_read: ${displayedTokens.cacheReadTokens}`}>
             {formatTokens(totalConsumedTokens)} tok
           </span>
         )}

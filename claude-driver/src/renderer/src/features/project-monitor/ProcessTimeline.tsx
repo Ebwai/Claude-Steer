@@ -36,6 +36,10 @@ interface ProcessTimelineProps {
   scrubberTargetNodeId?: string | null
   /** user_input 节点 ref 注册回调（供 HistoryScrubber 挂载 DOM 参考点） */
   onUserInputRef?: (nodeId: string, el: HTMLDivElement | null) => void
+  /** 历史壳不进入 activeSessionsAtom，由 SessionFrameNode 直接传入只读投影。 */
+  sessionOverride?: Session
+  /** realtime 才建立 JSONL watcher；history 只消费按需驻留详情。 */
+  source?: 'realtime' | 'history'
 }
 
 // ── 工具类型 → 颜色分类 ────────────────────────────────────────────────────
@@ -391,7 +395,7 @@ function TimelineNodeItem({ node, toolResults, onUserInputRef, isLastNode, sessi
       <div className={`ptl-node ptl-node-assistant${cursorClass}`} data-nodeid={node.id}>
         <span className={`ptl-dot ptl-dot-assistant${node.isGitted ? ' ptl-dot-gitted' : ''}`} />
         <div className="ptl-assistant-card">
-          <div className="ptl-assistant-text">
+          <div className="ptl-assistant-text ptl-paint-body">
             {isLong && !expanded ? text.slice(0, MAX_TEXT) + '…' : text}
           </div>
           {isLong && (
@@ -436,14 +440,22 @@ function TimelineNodeItem({ node, toolResults, onUserInputRef, isLastNode, sessi
 
 // ── 主组件 ─────────────────────────────────────────────────────────────────
 
-function ProcessTimeline({ projectId, sessionId: directSessionId, embedded = false, scrubberTargetNodeId, onUserInputRef }: ProcessTimelineProps): React.JSX.Element {
+function ProcessTimeline({
+  projectId,
+  sessionId: directSessionId,
+  embedded = false,
+  scrubberTargetNodeId,
+  onUserInputRef,
+  sessionOverride,
+  source = 'realtime',
+}: ProcessTimelineProps): React.JSX.Element {
   const { t } = useT()
   const project        = useAtomValue(projectByIdAtom(projectId ?? ''))
   const activeSessions = useAtomValue(activeSessionsAtom)
 
   // ── session 解析：优先使用 directSessionId，否则通过 project 查找 ──────────
-  let resolvedSession: Session | undefined
-  if (directSessionId) {
+  let resolvedSession: Session | undefined = sessionOverride
+  if (!resolvedSession && directSessionId) {
     resolvedSession = activeSessions.get(directSessionId)
   } else if (project?.activeSessionId) {
     resolvedSession = activeSessions.get(project.activeSessionId)
@@ -462,7 +474,6 @@ function ProcessTimeline({ projectId, sessionId: directSessionId, embedded = fal
   const session     = resolvedSession
   const [nodes]     = useAtom(timelineBySessionAtom(sessionId ?? '__none__'))
   const insertions  = useAtomValue(lineInsertionsBySessionAtom(sessionId ?? '__none__'))
-  console.log(`[ProcessTimeline] sessionId=${sessionId?.slice(0,8) ?? 'null'} nodes=${nodes.length} insertions=${insertions.length}`)
   const subagentIds = useAtomValue(subagentIdsAtom(sessionId ?? '__none__'))
 
   // ── 键盘游标节点 ID（用于 cursor overlay 指示器）────────────────────────────
@@ -520,16 +531,41 @@ function ProcessTimeline({ projectId, sessionId: directSessionId, embedded = fal
 
   // ── 触发 JSONL 监听（历史 + 实时）────────────────────────────────────────
   useEffect(() => {
-    if (!sessionId || !session?.transcriptPath) return
+    if (source !== 'realtime' || !sessionId || !session?.transcriptPath) return
+
+    const consumerId = `timeline:${sessionId}:${crypto.randomUUID()}`
+    let disposed = false
 
     void window.api.invoke(IPC.JSONL_WATCH, {
       transcriptPath: session.transcriptPath,
       sessionId,
       readFromStart: true,   // 总是先读历史，watcher 之后追加实时
+      consumerId,
     }).catch((err: unknown) => {
       console.error('[ProcessTimeline] JSONL_WATCH failed:', err)
+    }).finally(() => {
+      // StrictMode 可能在 WATCH invoke 完成前执行 cleanup；完成后补发释放，确保无孤儿租约。
+      if (!disposed) return
+      void window.api.invoke(IPC.JSONL_UNWATCH, {
+        sessionId,
+        consumerId,
+        reason: 'watch-completed-after-dispose',
+      }).catch((err: unknown) => {
+        console.warn('[ProcessTimeline] deferred JSONL_UNWATCH failed:', err)
+      })
     })
-  }, [sessionId, session?.transcriptPath])
+
+    return () => {
+      disposed = true
+      void window.api.invoke(IPC.JSONL_UNWATCH, {
+        sessionId,
+        consumerId,
+        reason: 'timeline-effect-cleanup',
+      }).catch((err: unknown) => {
+        console.warn('[ProcessTimeline] JSONL_UNWATCH failed:', err)
+      })
+    }
+  }, [sessionId, session?.transcriptPath, source])
 
   // ── 构建 tool_result 查找表（toolUseId → node）────────────────────────────
   const toolResults = new Map<string, TimelineNode>()

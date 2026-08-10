@@ -4,6 +4,8 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { assertReleaseNotesBody, parseReleaseArguments } from './release-notes.mjs'
+
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const DRIVER_DIR = resolve(SCRIPT_DIR, '..')
 const REPO_DIR = resolve(DRIVER_DIR, '..')
@@ -105,20 +107,25 @@ function chunk(items, size) {
   return chunks
 }
 
-function isPublicReadme(path) {
+export function isPublicReadme(path) {
   const fileName = path.split('/').at(-1) ?? ''
   return /^README(?:[._-].+)?\.md$/iu.test(fileName)
 }
 
-function shouldExcludeFromPublicRelease(path) {
+export function shouldExcludeFromPublicRelease(path) {
   const segments = path.split('/')
   const directorySegments = segments.slice(0, -1)
   const isInHiddenDirectory = directorySegments.some(
     (segment, index) => segment.startsWith('.') && !(index === 0 && segment === '.github')
   )
-  const isInternalDirectory = ['docs/', 'knowledge/', 'plan/', 'claude-driver/knowledge/'].some(
-    (prefix) => path.startsWith(prefix)
-  )
+  const isInternalDirectory = [
+    'docs/',
+    'knowledge/',
+    'plan/',
+    'release-notes/',
+    'tools/',
+    'claude-driver/knowledge/'
+  ].some((prefix) => path.startsWith(prefix))
   const isNonReadmeMarkdown = path.toLowerCase().endsWith('.md') && !isPublicReadme(path)
   return isInHiddenDirectory || isInternalDirectory || isNonReadmeMarkdown
 }
@@ -142,6 +149,14 @@ function preparePublicRelease(localReleaseBranch, publicReleaseBranch, version) 
   for (const paths of chunk(exclusions, 40)) {
     git(['rm', '--cached', '--ignore-unmatch', '--', ...paths])
   }
+  const remainingTools = git(['ls-files', '--', 'tools'], { capture: true })
+    .stdout.split(/\r?\n/u)
+    .filter(Boolean)
+  assert(
+    remainingTools.length === 0,
+    `正式发布分支仍包含开发工具：${remainingTools.join(', ')}`
+  )
+  log('STEP 5', 'INFO', '已确认正式发布分支不跟踪 tools/ 开发工具')
   git(['add', '--', '.gitignore'])
   git(['commit', '-m', `chore: prepare public v${version} repository`])
 
@@ -407,7 +422,7 @@ async function findTagWorkflowRun(stepScope, tag, commitSha) {
   throw new ReleaseError(`等待 ${tag} 对应的 ${WORKFLOW_FILE} 超时`)
 }
 
-function ensureDraftRelease(stepScope, tag) {
+function ensureDraftRelease(stepScope, tag, releaseNotes) {
   const creation = gh(
     [
       'release',
@@ -417,18 +432,38 @@ function ensureDraftRelease(stepScope, tag) {
       RELEASE_REPOSITORY,
       '--draft',
       '--verify-tag',
-      '--generate-notes',
+      '--notes-file',
+      releaseNotes.path,
       '--title',
       tag
     ],
     { capture: true, acceptedExitCodes: [0, 1] }
   )
-  if (creation.status === 0) return
 
-  log(stepScope, 'INFO', '自动构建可能已先创建 Release，正在核验现有 Release')
-  gh(['release', 'view', tag, '--repo', RELEASE_REPOSITORY, '--json', 'tagName,isDraft'], {
-    capture: true
-  })
+  if (creation.status !== 0) {
+    log(stepScope, 'INFO', '自动构建可能已先创建 Release，正在写入统一 Release Note')
+    gh([
+      'release',
+      'edit',
+      tag,
+      '--repo',
+      RELEASE_REPOSITORY,
+      '--notes-file',
+      releaseNotes.path,
+      '--title',
+      tag
+    ])
+  }
+
+  const release = parseJson(
+    gh(['release', 'view', tag, '--repo', RELEASE_REPOSITORY, '--json', 'tagName,isDraft,body'], {
+      capture: true
+    }).stdout,
+    'GitHub Release 正文核验结果'
+  )
+  assert(release.tagName === tag, `GitHub Release tag 不匹配：${release.tagName || '(empty)'}`)
+  assertReleaseNotesBody(releaseNotes.content, release.body)
+  log(stepScope, 'INFO', `已确认 ${tag} 使用 ${releaseNotes.path} 作为 Release Note`)
 }
 
 function verifyReleaseAssets(stepScope, tag) {
@@ -451,23 +486,30 @@ function verifyReleaseAssets(stepScope, tag) {
 
 function printUsage() {
   console.log('用法：')
-  console.log('  npm run release -- <版本号>')
-  console.log('  node claude-driver/scripts/release.mjs <版本号>')
-  console.log('示例：npm run release -- 1.0.1')
+  console.log('  npm run release -- <版本号> --notes')
+  console.log('  node claude-driver/scripts/release.mjs <版本号> --notes')
+  console.log('示例：npm run release -- 1.1.2 --notes')
+  console.log('Release Note：release-notes/v<版本号>.md')
 }
 
 async function main() {
-  const [version, ...extraArguments] = process.argv.slice(2)
-  if (version === '--help' || version === '-h') {
+  const args = process.argv.slice(2)
+  if (args[0] === '--help' || args[0] === '-h') {
     printUsage()
     return
   }
-  if (!version || extraArguments.length > 0) {
+
+  let releaseInput
+  try {
+    releaseInput = parseReleaseArguments(args, REPO_DIR)
+  } catch (error) {
     printUsage()
-    throw new ReleaseError('必须且只能传入一个版本号参数')
+    throw error
   }
 
+  const { version, releaseNotes } = releaseInput
   const tag = `v${version}`
+  log('PRECHECK', 'INFO', `Release Note：${releaseNotes.path}`)
 
   const { localReleaseBranch, remoteReleaseBranch, publicReleaseBranch } = precheck(version)
   await step(1, `更新应用版本为 ${version}`, () => updateVersion(version))
@@ -489,7 +531,9 @@ async function main() {
   )
   await step(7, `创建注释 tag ${tag}`, () => git(['tag', '-a', tag, '-m', `Release ${tag}`]))
   await step(8, `推送 tag ${tag} 到 ${RELEASE_REMOTE}`, () => git(['push', RELEASE_REMOTE, tag]))
-  await step(9, `创建或确认 ${tag} 的草稿 Release`, () => ensureDraftRelease('STEP 9', tag))
+  await step(9, `创建或确认 ${tag} 的草稿 Release`, () =>
+    ensureDraftRelease('STEP 9', tag, releaseNotes)
+  )
 
   const commitSha = git(['rev-parse', 'HEAD'], { capture: true }).stdout
   await step(10, `等待 ${tag} 自动构建完成`, async () => {
@@ -499,14 +543,25 @@ async function main() {
   })
   await step(11, `核验安装包并发布 ${tag} Release`, () => {
     verifyReleaseAssets('STEP 11', tag)
-    gh(['release', 'edit', tag, '--repo', RELEASE_REPOSITORY, '--draft=false', '--latest'])
+    gh([
+      'release',
+      'edit',
+      tag,
+      '--repo',
+      RELEASE_REPOSITORY,
+      '--notes-file',
+      releaseNotes.path,
+      '--draft=false',
+      '--latest'
+    ])
     const published = parseJson(
-      gh(['release', 'view', tag, '--repo', RELEASE_REPOSITORY, '--json', 'url,isDraft'], {
+      gh(['release', 'view', tag, '--repo', RELEASE_REPOSITORY, '--json', 'url,isDraft,body'], {
         capture: true
       }).stdout,
       'GitHub Release 发布结果'
     )
     assert(published.isDraft === false, `${tag} Release 仍处于草稿状态`)
+    assertReleaseNotesBody(releaseNotes.content, published.body)
     log('STEP 11', 'INFO', `Release 地址：${published.url}`)
   })
   await step(12, `切回 ${SOURCE_BRANCH}`, () => git(['switch', SOURCE_BRANCH]))
@@ -523,8 +578,10 @@ async function main() {
   log('SUMMARY', 'DONE', `${tag} 已完成正式仓库过滤、双远程推送、安装包发布与分支清理`)
 }
 
-main().catch((error) => {
-  log('SUMMARY', 'FAILED', error instanceof Error ? error.message : String(error))
-  log('SUMMARY', 'INFO', '已停止执行后续步骤；不会自动回滚或清理，请根据日志检查现场后处理')
-  process.exitCode = 1
-})
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    log('SUMMARY', 'FAILED', error instanceof Error ? error.message : String(error))
+    log('SUMMARY', 'INFO', '已停止执行后续步骤；不会自动回滚或清理，请根据日志检查现场后处理')
+    process.exitCode = 1
+  })
+}

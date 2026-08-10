@@ -59,6 +59,8 @@ Claude Steer is a cross-platform desktop Harness tool for AI. It is:
 
 If you use Claude Code (or plan to) and identify with any of the following, Claude Steer is for you:
 
+Website Introduction for Product Design and Demand Resolution: https://claude-steer-map.starkliang004.chatgpt.site/
+
 ### 👀 Workflow & Visibility
 
 - Full visualization of Claude Code workflows
@@ -187,11 +189,11 @@ chmod +x claude-steer-*.AppImage
 ```bash
 git clone https://github.com/Ebwai/Claude-Steer.git
 cd Claude-Steer/claude-driver
-npm install
+npm ci
 npm run dev
 ```
 
-> `npm install` triggers `postinstall` which compiles `node-pty` for your Electron version. Requires Node.js >= 22.12.0.
+> Use npm with the committed `package-lock.json`; do not install this workspace with pnpm. pnpm may block Electron/native lifecycle scripts and leave Electron without its platform binary. `postinstall` first verifies the bundled `node-pty` prebuild inside Electron and only compiles from source when the prebuild is unavailable. Requires Node.js >= 22.12.0.
 
 ### What happens on first launch?
 

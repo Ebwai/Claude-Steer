@@ -2,7 +2,11 @@
 // 编译说明：renderer 进程 browser bundle
 // 代码说明：K. 时间线数据能力组——timelineBySessionAtom / lineInsertionsBySessionAtom 的读写操作
 
-import { timelineBySessionAtom, lineInsertionsBySessionAtom } from '@renderer/atoms/timeline.atom'
+import {
+  timelineBySessionAtom,
+  lineInsertionsBySessionAtom,
+  timelineInsertionSignalAtom,
+} from '@renderer/atoms/timeline.atom'
 import type { TimelineNode } from '@renderer/atoms/timeline.atom'
 import type { LineInsertion, LineInsertionStatus } from '@shared/types/lineInsertion'
 import type { PtyBindings } from '@renderer/atoms/pty-binding.atom'
@@ -14,10 +18,18 @@ type Store = Pick<TestStore, 'get' | 'set'>
 
 /** K1: 追加单个时间线节点到指定 claudeId（按 id 去重，防止双路径重复推送） */
 export function appendTimelineNode(store: Store, claudeId: string, node: TimelineNode): void {
+  let appended = false
   store.set(timelineBySessionAtom(claudeId), (prev) => {
     if (prev.some((n) => n.id === node.id)) return prev
+    appended = true
     return [...prev, node]
   })
+  if (appended) {
+    store.set(timelineInsertionSignalAtom, (prev) => ({
+      sessionId: claudeId,
+      sequence: (prev?.sequence ?? 0) + 1,
+    }))
+  }
 }
 
 /** K2: 批量追加节点（历史回放用，按 id 去重） */
@@ -51,6 +63,11 @@ export function appendInsertion(store: Store, claudeId: string, insertion: LineI
   })
 
   if (isDuplicate) return
+
+  store.set(timelineInsertionSignalAtom, (prev) => ({
+    sessionId: claudeId,
+    sequence: (prev?.sequence ?? 0) + 1,
+  }))
 
   const transcriptPath = getTranscriptPath(store, claudeId)
   if (transcriptPath) {

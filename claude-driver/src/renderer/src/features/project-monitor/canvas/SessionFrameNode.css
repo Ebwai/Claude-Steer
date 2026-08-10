@@ -78,6 +78,30 @@
   color: var(--tx3);
 }
 
+.sfn-delete-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tx3);
+  font-size: 18px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.sfn-delete-btn:hover:not(:disabled) {
+  color: #e05a5a;
+  border-color: rgba(224, 90, 90, 0.55);
+  background: rgba(224, 90, 90, 0.08);
+}
+
+.sfn-delete-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 /* ── 进程线内容区 ─────────────────────────────────────────────────────────── */
 /* 不设 max-height，让内容自然撑高，框随内容动态增长 */
 
@@ -93,6 +117,29 @@
   overflow-y: visible;   /* 高度由内容撑开，不滚动——框本身随内容增高 */
   overflow-x: visible;   /* SubagentBlock 向左溢出不裁切 */
   max-height: none;
+}
+
+.sfn-history-shell {
+  min-height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tx3);
+  font-size: var(--text-sm);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.025), transparent);
+}
+
+.sfn-history-shell-hydrating {
+  animation: sfn-history-pulse 1.2s ease-in-out infinite;
+}
+
+.sfn-history-shell-error {
+  color: #e09a5a;
+}
+
+@keyframes sfn-history-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
 }
 
 /* ── Subagent 子时间线区 ─────────────────────────────────────────────────── */

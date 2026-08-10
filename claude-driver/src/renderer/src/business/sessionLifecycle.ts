@@ -18,6 +18,7 @@ import { addToRealtime, removeFromRealtime, isRealtimeVisible } from '@renderer/
 import { activeSessionsAtom } from '@renderer/atoms/session-core.atom'
 import { clearWorkStatus } from '@renderer/capabilities/agentActivity'
 import { pendingPtyStartsAtom } from '@renderer/atoms/pending-starts.atom'
+import { releaseSessionRuntime } from '@renderer/capabilities/runtimeResourceCapability'
 import type { TestStore } from '../../../__tests__/helpers/createTestStore'
 
 type Store = Pick<TestStore, 'get' | 'set'>
@@ -40,7 +41,14 @@ export interface StopPayload {
   cwd: string
 }
 
-export function createSessionLifecycle(store: Store, isBranchPending?: () => boolean) {
+interface SessionLifecycle {
+  register(): Array<() => void>
+  handleSessionStart(payload: SessionStartPayload): void
+  handleSessionEnd(payload: SessionEndPayload): void
+  handleStop(payload: StopPayload): void
+}
+
+export function createSessionLifecycle(store: Store, isBranchPending?: () => boolean): SessionLifecycle {
   function handleSessionStart(payload: SessionStartPayload): void {
     const { sessionId: claudeId, cwd, transcriptPath, receivedAt } = payload
     console.log(`[BL-2] handleSessionStart: claudeId=${claudeId.slice(0,8)} cwd=${cwd}`)
@@ -79,6 +87,7 @@ export function createSessionLifecycle(store: Store, isBranchPending?: () => boo
             ...placeholder,
             claudeId,
             id: ptyId,
+            isPtyPlaceholder: false,
             ...(transcriptPath ? { transcriptPath } : {}),
             status: 'Running',
             cwd,
@@ -144,6 +153,7 @@ export function createSessionLifecycle(store: Store, isBranchPending?: () => boo
     if (existing) {
       completeSession(store, claudeId, receivedAt)
       removeFromRealtime(store, claudeId)
+      releaseSessionRuntime(store, claudeId, { mode: 'handoff', reason: 'session-end-hook' })
     } else {
       // CWD fallback（极端情况：外部启动 session 且 PTY_BIND 还未到达）
       const matched = findSessionByCwd(store, cwd)
@@ -152,6 +162,7 @@ export function createSessionLifecycle(store: Store, isBranchPending?: () => boo
         if (matchedSess.status === 'Running' || matchedSess.status === 'Paused') {
           completeSession(store, matchedKey, receivedAt)
           removeFromRealtime(store, matchedKey)
+          releaseSessionRuntime(store, matchedKey, { mode: 'handoff', reason: 'session-end-cwd-fallback' })
         }
       }
     }

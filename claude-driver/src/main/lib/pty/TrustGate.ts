@@ -42,6 +42,11 @@ function isTrustDialog(text: string): boolean {
   return hasQuestion && hasConfirmationOption
 }
 
+function isInputPromptReady(text: string): boolean {
+  // Claude 的普通输入提示符。trust 对话框也可能包含 ❯，因此调用方必须先排除完整 trust 对话框。
+  return /(?:^|[\r\n])\s*❯[\s\u00a0]/u.test(text)
+}
+
 export function createTrustGate(options: TrustGateOptions): TrustGate {
   let state: TrustGateState = 'armed'
   let startupBuffer = ''
@@ -58,18 +63,51 @@ export function createTrustGate(options: TrustGateOptions): TrustGate {
     )
   }
 
+  const transitionReady = (reason: string): void => {
+    if (state !== 'armed' && state !== 'handled') return
+    state = 'ready'
+    startupBuffer = ''
+    const actions = pendingActions.splice(0)
+    console.log(
+      `[TrustGate] ready: session=${options.sessionId} reason=${reason} deferredActions=${actions.length}`,
+    )
+    for (const { action, label } of actions) {
+      try {
+        action()
+        console.log(`[TrustGate] deferred action flushed: session=${options.sessionId} label=${label}`)
+      } catch (error) {
+        console.error(
+          `[TrustGate] deferred action failed: session=${options.sessionId} label=${label}`,
+          error,
+        )
+      }
+    }
+  }
+
   return {
     get state(): TrustGateState {
       return state
     },
 
     inspect(data: string): boolean {
-      if (state !== 'armed') return false
+      if (state !== 'armed' && state !== 'handled') return false
 
       startupBuffer = `${startupBuffer}${stripAnsi(data)}`.slice(-MAX_STARTUP_BUFFER_CHARS)
-      if (!isTrustDialog(startupBuffer)) return false
+      if (state === 'handled') {
+        if (isInputPromptReady(startupBuffer)) {
+          transitionReady('claude-input-prompt-after-trust')
+        }
+        return false
+      }
+      if (!isTrustDialog(startupBuffer)) {
+        if (isInputPromptReady(startupBuffer)) {
+          transitionReady('claude-input-prompt')
+        }
+        return false
+      }
 
       state = 'handled'
+      startupBuffer = ''
       console.log(`[TrustGate] trust dialog confirmed once: session=${options.sessionId}`)
       options.confirmTrust('\r')
       return true
@@ -85,24 +123,7 @@ export function createTrustGate(options: TrustGateOptions): TrustGate {
     },
 
     markReady(reason: string): void {
-      if (state !== 'armed' && state !== 'handled') return
-      state = 'ready'
-      startupBuffer = ''
-      const actions = pendingActions.splice(0)
-      console.log(
-        `[TrustGate] ready: session=${options.sessionId} reason=${reason} deferredActions=${actions.length}`,
-      )
-      for (const { action, label } of actions) {
-        try {
-          action()
-          console.log(`[TrustGate] deferred action flushed: session=${options.sessionId} label=${label}`)
-        } catch (error) {
-          console.error(
-            `[TrustGate] deferred action failed: session=${options.sessionId} label=${label}`,
-            error,
-          )
-        }
-      }
+      transitionReady(reason)
     },
 
     dispose(reason: string): void {

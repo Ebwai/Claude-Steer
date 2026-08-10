@@ -32,8 +32,16 @@ export function parseJsonlLine(line: string): JsonlRecord | null {
   }
 
   if (typeof raw !== 'object' || raw === null) return null
+  return parseJsonlObject(raw as Record<string, unknown>)
+}
 
-  const obj = raw as Record<string, unknown>
+/**
+ * 解析已经完成 JSON.parse 的 JSONL 对象。
+ * history loader 需要先读取 forkedFrom/file-history-snapshot 元数据，复用本入口可避免同一行二次解析。
+ * 返回的 raw 只允许在当前调用链短暂存在；历史链路必须立即投影并丢弃它。
+ */
+export function parseJsonlObject(raw: Record<string, unknown>): JsonlRecord | null {
+  const obj = raw
   const msgType = obj['type'] as string | undefined
 
   // 只处理 user / assistant 两种消息行，其余（permission-mode, system, attachment 等）全部跳过
@@ -125,7 +133,7 @@ export function parseJsonlLine(line: string): JsonlRecord | null {
     agentId,
     usage,
     model,
-    raw,
+    raw: obj,
     parsedAt,
   }
 }

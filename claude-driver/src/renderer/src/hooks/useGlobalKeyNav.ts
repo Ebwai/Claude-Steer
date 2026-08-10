@@ -11,7 +11,7 @@ import { timelineBySessionAtom, lineInsertionsBySessionAtom, cursorNodeIndexAtom
 import { sessionRelationsAtom } from '../atoms/sessions.atom'
 import { buildJumpableNodes } from '../capabilities/jumpableNodes'
 import type { FrameLayout } from './useSessionFrameLayout'
-import type { RelationsMap } from './useSessionFrameLayout'
+import { resolveHistoryHorizontalTarget } from './historyHorizontalNavigation'
 
 export function useGlobalKeyNav(
   rf: ReactFlowInstance,
@@ -25,36 +25,6 @@ export function useGlobalKeyNav(
 
   // ── ←→ 框间导航 ──────────────────────────────────────────────────────────
 
-  const getNextSessionId = useCallback((currentId: string, direction: 'left' | 'right'): string | null => {
-    const relations = store.get(sessionRelationsAtom)
-
-    // 判断当前 session 是 parent 还是 branch
-    const ownRel = relations.get(currentId)
-    const isBranch = ownRel?.type === 'branch'
-
-    if (isBranch && ownRel?.parentSessionId) {
-      const parentId = ownRel.parentSessionId
-      const side     = ownRel.side ?? 'right'
-      console.log(`[KeyNav] branch nav: id=${currentId.slice(0,8)} side=${side} dir=${direction} parent=${parentId.slice(0,8)}`)
-      // 按"向内"方向（朝父框）→ 小跳回父框
-      if (direction === 'left' && side === 'right') return parentId
-      if (direction === 'right' && side === 'left') return parentId
-      // 按"向外"方向（背离父框）→ 直接大跳到相邻 cluster parent
-      // 不做 sibling 查找——否则自身会被包含导致返回 self（silent no-op）
-      return getAdjacentClusterParent(parentId, direction, layouts, relations)
-    }
-
-    // 当前是 parent（cluster 代表）：先小跳到对应方向最近的 branch
-    const targetSide = direction === 'right' ? 'right' : 'left'
-    const children = Array.from(relations.entries())
-      .filter(([, r]) => r.type === 'branch' && r.parentSessionId === currentId && (r.side ?? 'right') === targetSide)
-      .sort((a, b) => (a[1].branchIndex ?? 0) - (b[1].branchIndex ?? 0))
-    console.log(`[KeyNav] parent nav: id=${currentId.slice(0,8)} dir=${direction} targetSide=${targetSide} children=${children.length}`)
-    if (children.length > 0) return children[0][0]  // branchIndex 最小（最近）
-    // 无 branch → 大跳到相邻 cluster parent
-    return getAdjacentClusterParent(currentId, direction, layouts, relations)
-  }, [store, layouts])
-
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     // 只在画布容器获焦时响应（防止与输入框冲突）
     const target = e.target as HTMLElement
@@ -65,10 +35,13 @@ export function useGlobalKeyNav(
       const currentId = store.get(focusedSessionIdAtom) ?? layouts[0]?.sessionId
       if (!currentId) return
       const direction = e.key === 'ArrowLeft' ? 'left' : 'right'
-      const nextId = getNextSessionId(currentId, direction)
+      const relations = store.get(sessionRelationsAtom)
+      const nextId = resolveHistoryHorizontalTarget(currentId, direction, layouts, relations)
       if (nextId) {
         console.log(`[KeyNav] ←→ ${currentId.slice(0,8)} → ${nextId.slice(0,8)} (${direction})`)
         focusSession(nextId)
+      } else {
+        console.info(`[KeyNav] boundary current=${currentId.slice(0,8)} direction=${direction} relation=${relations.get(currentId)?.type ?? 'root'}`)
       }
       return
     }
@@ -120,34 +93,10 @@ export function useGlobalKeyNav(
         rf.setViewport({ ...vp, y: vp.y - delta }, { duration: 100 })
       })
     }
-  }, [store, layouts, getNextSessionId, focusSession, rf, canvasContainerRef])
+  }, [store, layouts, focusSession, rf, canvasContainerRef])
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleKeyDown])
-}
-
-// ── 辅助：找相邻 cluster 的 parent ────────────────────────────────────────────
-
-function getAdjacentClusterParent(
-  currentId: string,
-  direction: 'left' | 'right',
-  layouts: FrameLayout[],
-  relations: RelationsMap,
-): string | null {
-  // 过滤出所有 cluster parent（非 branch 子框）
-  const branchChildSet = new Set(
-    Array.from(relations.entries())
-      .filter(([, r]) => r.type === 'branch')
-      .map(([id]) => id)
-  )
-  const parents = layouts
-    .filter((l) => !branchChildSet.has(l.sessionId))
-    .sort((a, b) => a.x - b.x)
-
-  const currentIdx = parents.findIndex((l) => l.sessionId === currentId)
-  if (currentIdx < 0) return null
-  const targetIdx = direction === 'right' ? currentIdx + 1 : currentIdx - 1
-  return parents[targetIdx]?.sessionId ?? null
 }

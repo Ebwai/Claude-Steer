@@ -99,6 +99,8 @@ export interface Session {
   endedAt: number | null
   /** 关联的 Git Worktree 路径（非 Git 项目为 null） */
   worktreePath: string | null
+  /** 真实 Claude UUID 尚未产生时的临时 PTY 会话；仅供实时输入，不得进入历史画布。 */
+  isPtyPlaceholder?: boolean
 }
 
 // ════════════════════════════════════════════════════════════
@@ -426,3 +428,6 @@ export interface ProviderEnvBlock {
   API_TIMEOUT_MS?: string
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC?: string
 }
+
+// 历史工作区跨进程契约（放在末尾避免打断既有领域类型编号）
+export * from './history'

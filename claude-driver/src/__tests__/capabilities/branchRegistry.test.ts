@@ -7,6 +7,7 @@ import { createTestStore } from '../helpers/createTestStore'
 import type { TestStore } from '../helpers/createTestStore'
 import {
   registerBranch,
+  unregisterBranch,
   updateBranchSnapshot,
   cachePendingSnapshot,
   consumePendingSnapshot,
@@ -43,19 +44,29 @@ describe('L1: registerBranch', () => {
     expect(rel.branchIndex).toBe(2)
   })
 
-  it('lineLength 随 branchIndex 线性增长', () => {
+  it('lineLength 按左右交替后的同侧序号向外增长', () => {
     registerBranch(store, 'c1', 'parent-1', { triggerNodeIndex: 0 })
     registerBranch(store, 'c2', 'parent-1', { triggerNodeIndex: 0 })
+    registerBranch(store, 'c3', 'parent-1', { triggerNodeIndex: 0 })
     const r1 = store.get(sessionRelationsAtom).get('c1')!
     const r2 = store.get(sessionRelationsAtom).get('c2')!
-    expect(r2.lineLength!).toBe(r1.lineLength! * 2)
+    const r3 = store.get(sessionRelationsAtom).get('c3')!
+    expect(r2.lineLength).toBe(r1.lineLength)
+    expect(r3.lineLength!).toBeGreaterThan(r1.lineLength!)
   })
 
-  it('不同触发节点的 branchIndex 各自独立计数', () => {
+  it('不同触发节点仍按同一父会话全局连续编号', () => {
     registerBranch(store, 'c1', 'parent-1', { triggerNodeIndex: 5 })
     registerBranch(store, 'c2', 'parent-1', { triggerNodeIndex: 10 })
     expect(store.get(sessionRelationsAtom).get('c1')!.branchIndex).toBe(1)
-    expect(store.get(sessionRelationsAtom).get('c2')!.branchIndex).toBe(1)
+    expect(store.get(sessionRelationsAtom).get('c2')!.branchIndex).toBe(2)
+  })
+
+  it('同一 child 重复注册保持幂等且不占用新序号', () => {
+    registerBranch(store, 'c1', 'parent-1', { triggerNodeIndex: 5 })
+    registerBranch(store, 'c1', 'parent-1', { triggerNodeIndex: 5 })
+    expect(store.get(branchCountAtom).get('parent-1')).toBe(1)
+    expect(store.get(sessionRelationsAtom).size).toBe(1)
   })
 
   it('写入 parentSessionId / triggerNodeIndex 字段', () => {
@@ -160,5 +171,23 @@ describe('L6: isBranchParent', () => {
   it('子 session 本身不是宿主', () => {
     registerBranch(store, 'child-1', 'parent-1', { triggerNodeIndex: 0 })
     expect(isBranchParent(store, 'child-1')).toBe(false)
+  })
+})
+
+// ── L7: unregisterBranch / reindexChildren ──────────────────────────────────
+
+describe('L7: unregisterBranch', () => {
+  it('删除中间 Branch 后按剩余顺序连续重排且不留位置空洞', () => {
+    registerBranch(store, 'c1', 'parent-1', { triggerNodeIndex: 0 })
+    registerBranch(store, 'c2', 'parent-1', { triggerNodeIndex: 0 })
+    registerBranch(store, 'c3', 'parent-1', { triggerNodeIndex: 0 })
+
+    unregisterBranch(store, 'c2')
+
+    const relations = store.get(sessionRelationsAtom)
+    expect(relations.has('c2')).toBe(false)
+    expect(relations.get('c1')).toMatchObject({ branchIndex: 1, side: 'right' })
+    expect(relations.get('c3')).toMatchObject({ branchIndex: 2, side: 'left' })
+    expect(store.get(branchCountAtom).get('parent-1')).toBe(2)
   })
 })

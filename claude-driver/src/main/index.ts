@@ -34,7 +34,10 @@ import { scanForProjects } from './lib/projects/ProjectScanner'
 import { prepareProjectDirectory } from './lib/projects/ProjectDirectory'
 import { PtyManager } from './lib/pty/PtyManager'
 import { createTrustGate, type TrustGate } from './lib/pty/TrustGate'
+import { findNewBranchTranscript, snapshotTranscriptIds } from './lib/pty/BranchTranscriptDetector'
+import { resolveSessionStartPty } from './lib/pty/PtySessionBinding'
 import { JsonlWatcher } from './lib/jsonl/JsonlWatcher'
+import { HistoryService, resolveProjectDirectory } from './lib/history'
 import { GitManager } from './lib/git/GitManager'
 import { checkAllDependencies, autoInstallClaude } from './lib/deps/DependencyChecker'
 import { NotificationService } from './lib/notification/NotificationService'
@@ -57,12 +60,26 @@ import {
   updateClaudeId as updateSchedulerClaudeId,
   type SchedulerSessionEntry,
 } from './lib/scheduler/SchedulerStore'
-import type { ClaimStatus, PermissionMode, Project, GitMark, HookPayload, HookEvent } from '../shared/types/index'
+import type {
+  ClaimStatus,
+  PermissionMode,
+  Project,
+  GitMark,
+  HookPayload,
+  HookEvent,
+  HistoryOpenInput,
+  HistoryCatalogContinueInput,
+  HistoryDetailsInput,
+  HistorySessionSealInput,
+  HistoryDeleteInput,
+  HistoryTokenInventoryInput,
+} from '../shared/types/index'
 import { RemoteBridgeService } from './services/RemoteBridgeService'
 import { initUpdater, checkForUpdates, downloadUpdate, quitAndInstall } from './lib/updater/index'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import readline from 'readline'
 import { randomUUID } from 'crypto'
 
 // ── 文件日志系统（永久化到磁盘，便于诊断问题）──────────────────────────────
@@ -236,6 +253,59 @@ const confirmedBranchPtyIds = new Set<string>()  // 已确认 branch 的 ptyId�
 // claudeToPtyMap: claudeId → ptyId（用于 SESSION_INPUT 路由）
 const ptyToClaudeMap = new Map<string, string>()
 const claudeToPtyMap = new Map<string, string>()
+
+function watchForBranchTranscript(
+  parentPtyId: string,
+  parentClaudeId: string,
+  projectPath: string,
+  branchStartedAt: number,
+): void {
+  const encoded = projectPath.replace(/[^a-zA-Z0-9]/g, '-')
+  const projectDir = path.join(os.homedir(), '.claude', 'projects', encoded)
+  const knownSessionIds = snapshotTranscriptIds(projectDir)
+  const deadline = branchStartedAt + 120_000
+  console.log(
+    `[Branch] JSONL fallback armed parent=${parentClaudeId} pty=${parentPtyId} known=${knownSessionIds.size} dir=${projectDir}`,
+  )
+
+  const poll = (): void => {
+    if (pendingBranchByPtySession.get(parentPtyId) !== branchStartedAt) return
+    const candidate = findNewBranchTranscript(projectDir, parentClaudeId, knownSessionIds)
+    if (candidate) {
+      pendingBranchByPtySession.delete(parentPtyId)
+      confirmedBranchPtyIds.add(parentPtyId)
+      setTimeout(() => confirmedBranchPtyIds.delete(parentPtyId), 30_000)
+      console.log(
+        `[Branch] Confirmed via JSONL: child=${candidate.sessionId} parent=${parentClaudeId} pty=${parentPtyId}`,
+      )
+      mainWindow?.webContents.send(IPC.SESSION_BRANCH_LINK, {
+        sessionId: parentPtyId,
+        branchSessionId: candidate.sessionId,
+        timestamp: Date.now(),
+      })
+      // confirm 必须先于 PTY_BIND，Branch 状态机才能先进入 PENDING_BIND。
+      autoWatchTranscript(
+        candidate.sessionId,
+        projectPath,
+        branchStartedAt,
+        false,
+        parentPtyId,
+        candidate.sessionId,
+      )
+      return
+    }
+    if (Date.now() >= deadline) {
+      pendingBranchByPtySession.delete(parentPtyId)
+      console.warn(
+        `[Branch] JSONL fallback timed out parent=${parentClaudeId} pty=${parentPtyId} project=${projectPath}`,
+      )
+      return
+    }
+    setTimeout(poll, 250)
+  }
+
+  setTimeout(poll, 100)
+}
 // 存储当前活跃 session 的 cwd，用于通知窗口 catch-up（通知窗口打开时重放 PTY_BIND）
 const sessionCwdMap = new Map<string, { ptyId: string; cwd: string }>()
 // 缓存最近的 PermissionRequest Hook payload，用于通知窗口 catch-up（通知窗口加载完成时重放）
@@ -247,8 +317,15 @@ function bindPtyToClaudeSession(ptyId: string, claudeId: string, transcriptPath:
   // 若该 ptyId 已有旧绑定，先解绑旧的
   const oldClaudeId = ptyToClaudeMap.get(ptyId)
   if (oldClaudeId && oldClaudeId !== claudeId) {
-    claudeToPtyMap.delete(oldClaudeId)
+    if (claudeToPtyMap.get(oldClaudeId) === ptyId) claudeToPtyMap.delete(oldClaudeId)
+    sessionCwdMap.delete(oldClaudeId)
     console.log(`[PtyBind] Re-bind: PTY ${ptyId} was bound to ${oldClaudeId}, now rebinding to ${claudeId}`)
+  }
+  // resume 会为同一个 Claude 会话创建新 PTY；清掉旧 PTY 的反向边，避免 Hook/退出事件误路由。
+  const oldPtyId = claudeToPtyMap.get(claudeId)
+  if (oldPtyId && oldPtyId !== ptyId) {
+    if (ptyToClaudeMap.get(oldPtyId) === claudeId) ptyToClaudeMap.delete(oldPtyId)
+    console.log(`[PtyBind] Resume re-bind: Claude ${claudeId} moved from PTY ${oldPtyId} to ${ptyId}`)
   }
   ptyToClaudeMap.set(ptyId, claudeId)
   claudeToPtyMap.set(claudeId, ptyId)
@@ -269,15 +346,17 @@ function unbindPtyFromClaudeSession(claudeId: string): void {
     console.debug(`[PtyBind] Unbind ignored: no binding for Claude ${claudeId}`)
     return
   }
-  ptyToClaudeMap.delete(ptyId)
-  claudeToPtyMap.delete(claudeId)
+  if (ptyToClaudeMap.get(ptyId) === claudeId) ptyToClaudeMap.delete(ptyId)
+  if (claudeToPtyMap.get(claudeId) === ptyId) claudeToPtyMap.delete(claudeId)
   sessionCwdMap.delete(claudeId)
+  // SessionEnd / PTY exit 的统一 watcher 释放边界。renderer 随后的 UNWATCH 可重复调用。
+  const releasedFiles = jsonlWatcher?.unwatchSession(claudeId) ?? 0
   const unbindPayload = { ptyId, claudeId }
   mainWindow?.webContents.send(IPC.PTY_UNBIND, unbindPayload)
   if (notificationWindow && !notificationWindow.isDestroyed()) {
     notificationWindow.webContents.send(IPC.PTY_UNBIND, unbindPayload)
   }
-  console.log(`[PtyBind] Unbound PTY ${ptyId} ↔ Claude ${claudeId}`)
+  console.log(`[PtyBind] Unbound PTY ${ptyId} ↔ Claude ${claudeId}; watcherFiles=${releasedFiles}`)
 }
 
 /** 过滤 ANSI 转义码，返回纯文本 */
@@ -288,6 +367,7 @@ function stripAnsi(str: string): string {
 
 // ── JsonlWatcher 全局实例（跨 session 共享，多文件监听复用单个 watcher）───
 let jsonlWatcher: JsonlWatcher | null = null
+let historyService: HistoryService | null = null
 
 function getJsonlWatcher(): JsonlWatcher {
   if (!jsonlWatcher) {
@@ -308,6 +388,17 @@ function getJsonlWatcher(): JsonlWatcher {
     })
   }
   return jsonlWatcher
+}
+
+function getHistoryService(): HistoryService {
+  if (!historyService) {
+    historyService = new HistoryService({
+      isSessionRunning: (sessionId) => claudeToPtyMap.has(sessionId),
+      unwatchSession: (sessionId) => { getJsonlWatcher().unwatchSession(sessionId) },
+    })
+    console.info('[HistoryService] initialized')
+  }
+  return historyService
 }
 
 /**
@@ -453,7 +544,12 @@ function autoWatchTranscript(sessionId: string, projectPath: string, startTime: 
         } catch { /* ignore read/parse errors */ }
 
         // 关键：用 effectiveClaudeId 注册 watchFile，确保记录路由到正确 ProcessTimeline
-        getJsonlWatcher().watchFile(filePath, effectiveClaudeId, true) // readFromStart=true 全量读取
+        // autoWatch 只负责发现真实 transcript/Claude UUID 并建立绑定；持续 tail 的所有权属于
+        // 已挂载的 ProcessTimeline。立即释放临时 consumer，后台项目不会继续向 renderer 堆积正文。
+        const watcher = getJsonlWatcher()
+        const consumerId = `auto-bind:${effectiveClaudeId}`
+        watcher.watchFile(filePath, effectiveClaudeId, false, undefined, consumerId)
+        watcher.releaseSessionConsumer(effectiveClaudeId, consumerId)
         return true
       }
     } catch { /* file may not exist */ }
@@ -1010,15 +1106,30 @@ function registerIpcHandlers(): void {
         if (payload.text.trim() === '/branch') {
           console.log(`[Branch] /branch detected on session ${payload.sessionId} → ptyId=${ptyId}`)
           // key 统一用真实 ptyId（hook server 用 ptyIdBeforeUnbind 查，必须与此一致）
-          pendingBranchByPtySession.set(ptyId, Date.now())
+          const branchStartedAt = Date.now()
+          pendingBranchByPtySession.set(ptyId, branchStartedAt)
           // parentClaudeId：从 ptyId 反查（ptyId 绑定到当前运行的 claudeId）
-          const parentClaudeIdForBranch = ptyToClaudeMap.get(ptyId)
+          const parentClaudeIdForBranch = ptyToClaudeMap.get(ptyId) ?? payload.sessionId
           // SESSION_BRANCH_LINK 预通知：sessionId 用 ptyId（渲染层 branchHandler 期望的 parentPtyId）
           mainWindow?.webContents.send(IPC.SESSION_BRANCH_LINK, {
             sessionId: ptyId,
             parentClaudeId: parentClaudeIdForBranch,
-            timestamp: Date.now(),
+            timestamp: branchStartedAt,
           })
+          const projectPath = sessionCwdMap.get(parentClaudeIdForBranch)?.cwd
+            ?? sessionCwdMap.get(ptyId)?.cwd
+          if (projectPath) {
+            watchForBranchTranscript(
+              ptyId,
+              parentClaudeIdForBranch,
+              projectPath,
+              branchStartedAt,
+            )
+          } else {
+            console.warn(
+              `[Branch] JSONL fallback unavailable: cwd missing parent=${parentClaudeIdForBranch} pty=${ptyId}`,
+            )
+          }
           // 3s 后连发 2×Ctrl+C，强制 branch session 退出以触发 SessionEnd hook
           setTimeout(() => {
             if (pendingBranchByPtySession.has(ptyId)) {
@@ -1077,7 +1188,6 @@ function registerIpcHandlers(): void {
     try {
       const logWinState = (globalThis as Record<string, unknown>).__logMainWinState as ((tag: string) => void) | undefined
       logWinState?.('SESSION_RESUME_begin')
-      const sessionStartTime = Date.now()
       createManagedTrustGate(sessionId, payload.projectPath)
       logWinState?.('SESSION_RESUME_afterTrust')
       ptyManager.resumeSession({
@@ -1102,9 +1212,32 @@ function registerIpcHandlers(): void {
         },
       })
       logWinState?.('SESSION_RESUME_afterPtyStart')
-      // claude -r 不触发 SessionStart hook，依赖 autoWatchTranscript 建立 PTY↔Claude 绑定
-      // expectedClaudeId = resumeSessionId（claudeId），确保只匹配主线 JSONL，不误绑 branch JSONL
-      autoWatchTranscript(sessionId, payload.projectPath, sessionStartTime, true, undefined, payload.resumeSessionId)
+      // resume 的目标 Claude UUID 和 transcript 路径都已知，必须立即确定性绑定。
+      // 不能再按 cwd 猜 PTY：同一项目的 Branch 与多次 resume 会同时存在多个 PTY。
+      const transcriptPath = path.join(
+        resolveProjectDirectory(payload.projectPath),
+        `${payload.resumeSessionId}.jsonl`,
+      )
+      bindPtyToClaudeSession(
+        sessionId,
+        payload.resumeSessionId,
+        transcriptPath,
+        payload.projectPath,
+      )
+      // 恢复路径同样只预登记绑定，持续 tail 由 renderer 的 ProcessTimeline 租约接管。
+      const resumeWatcher = getJsonlWatcher()
+      const resumeConsumerId = `resume-bind:${sessionId}`
+      resumeWatcher.watchFile(
+        transcriptPath,
+        payload.resumeSessionId,
+        false,
+        undefined,
+        resumeConsumerId,
+      )
+      resumeWatcher.releaseSessionConsumer(payload.resumeSessionId, resumeConsumerId)
+      console.info(
+        `[PtyBind] Resume deterministic bind: Claude=${payload.resumeSessionId} PTY=${sessionId} transcript=${transcriptPath}`,
+      )
       logWinState?.('SESSION_RESUME_afterWatch')
       console.log(`[ipc] session:resume OK → ${sessionId}`)
       return { ok: true, sessionId }
@@ -1480,10 +1613,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.JSONL_WATCH, async (
     _event,
-    payload: { transcriptPath: string; sessionId: string; readFromStart: boolean }
+    payload: { transcriptPath: string; sessionId: string; readFromStart: boolean; consumerId?: string }
   ) => {
+    const consumerId = payload.consumerId ?? 'renderer-timeline'
     try {
       const watcher = getJsonlWatcher()
+      // 先登记租约和 tail offset；这样组件在全量回放期间卸载时，UNWATCH 能中止下面的流式读取。
+      watcher.watchFile(payload.transcriptPath, payload.sessionId, false, undefined, consumerId)
+      let replayCancelled = false
 
       if (payload.readFromStart) {
         // 历史模式：若文件已存在则全量读取后分批推送；否则跳过（session 刚启动时文件尚未创建）
@@ -1491,21 +1628,48 @@ function registerIpcHandlers(): void {
           console.log(`[ipc] jsonl:watch: file not yet created, skip historical read for ${payload.sessionId}`)
         } else {
           const { parseJsonlLine } = await import('./lib/jsonl/JsonlParser')
-          const content = fs.readFileSync(payload.transcriptPath, 'utf-8')
-          const lines = content.split('\n').filter((l) => l.trim())
-
-          // 扫描最后 30 行，查找最近的 file-history-snapshot（branch 起始点）
-          // 找到后通过 JSONL_BRANCH_SNAPSHOT 通知 renderer，renderer 据此过滤掉父 session 历史前缀
-          const tailLines = lines.slice(-30)
+          // 流式解析并按 50 条立即投递，避免同时常驻 content + lines + raw records 三份大对象。
+          const BATCH_SIZE = 50
+          let recordCount = 0
+          let prevWasSnapshot = false
           let branchStartUuid: string | undefined
-          for (let i = tailLines.length - 1; i >= 0; i--) {
+          let batch: NonNullable<ReturnType<typeof parseJsonlLine>>[] = []
+          const historicalSize = fs.statSync(payload.transcriptPath).size
+          const input = fs.createReadStream(payload.transcriptPath, {
+            encoding: 'utf-8',
+            end: Math.max(0, historicalSize - 1),
+          })
+          const lines = readline.createInterface({ input, crlfDelay: Infinity })
+          for await (const line of lines) {
+            if (!watcher.hasSessionConsumer(payload.sessionId, consumerId)) {
+              replayCancelled = true
+              lines.close()
+              input.destroy()
+              break
+            }
+            if (!line.trim()) continue
+            let isSnapshot = false
             try {
-              const obj = JSON.parse(tailLines[i]) as Record<string, unknown>
-              if (obj['type'] === 'file-history-snapshot') {
-                branchStartUuid = obj['messageId'] as string | undefined
-                break
-              }
-            } catch { /* ignore */ }
+              const raw = JSON.parse(line) as Record<string, unknown>
+              isSnapshot = raw['type'] === 'file-history-snapshot'
+              if (isSnapshot && typeof raw['messageId'] === 'string') branchStartUuid = raw['messageId']
+            } catch { /* parseJsonlLine 会统一忽略无效行 */ }
+            const wasPrevSnapshot = prevWasSnapshot
+            prevWasSnapshot = isSnapshot
+            const record = parseJsonlLine(line)
+            if (!record) continue
+            record.sessionId = payload.sessionId
+            if (wasPrevSnapshot && record.type === 'user') record.isBranchStart = true
+            // renderer 只消费紧凑字段；禁止把完整 JSON 对象 structured-clone 一份过去。
+            delete record.raw
+            batch.push(record)
+            recordCount += 1
+            if (batch.length < BATCH_SIZE) continue
+            mainWindow?.webContents.send(IPC.JSONL_RECORDS, { sessionId: payload.sessionId, records: batch })
+            batch = []
+          }
+          if (batch.length > 0) {
+            mainWindow?.webContents.send(IPC.JSONL_RECORDS, { sessionId: payload.sessionId, records: batch })
           }
           if (branchStartUuid) {
             mainWindow?.webContents.send(IPC.JSONL_BRANCH_SNAPSHOT, {
@@ -1514,35 +1678,14 @@ function registerIpcHandlers(): void {
             })
             console.log(`[ipc] jsonl:watch branch snapshot detected for ${payload.sessionId}: ${branchStartUuid}`)
           }
+          console.log(`[ipc] jsonl:watch historical - streamed ${recordCount} records for ${payload.sessionId}`)
 
-          // 逐行解析并追踪 file-history-snapshot，标注 isBranchStart
-          let prevWasSnapshot = false
-          const records = lines.map((l) => {
-            const isSnapshot = (() => {
-              try { return (JSON.parse(l) as Record<string, unknown>)['type'] === 'file-history-snapshot' }
-              catch { return false }
-            })()
-            const wasPrevSnapshot = prevWasSnapshot
-            prevWasSnapshot = isSnapshot
-
-            const r = parseJsonlLine(l)
-            if (r) {
-              r.sessionId = payload.sessionId
-              if (wasPrevSnapshot && r.type === 'user') r.isBranchStart = true
-            }
-            return r
-          }).filter(Boolean)
-
-          // 分批推送（每批 50 条，避免 IPC 消息过大）
-          const BATCH_SIZE = 50
-          for (let i = 0; i < records.length; i += BATCH_SIZE) {
-            const batch = records.slice(i, i + BATCH_SIZE)
-            mainWindow?.webContents.send(IPC.JSONL_RECORDS, {
-              sessionId: payload.sessionId,
-              records: batch,
-            })
+          if (replayCancelled) {
+            console.info(
+              `[ipc] jsonl:watch historical cancelled session=${payload.sessionId.slice(0, 8)} consumer=${consumerId}`,
+            )
+            return { ok: true, cancelled: true, resources: watcher.getResourceSnapshot() }
           }
-          console.log(`[ipc] jsonl:watch historical - sent ${records.length} records for ${payload.sessionId}`)
 
           // 同步加载 subagent 插入线（仅历史模式）
           // 注意：subagent JSONL 时间线节点由 JsonlWatcher.watchFile() → scanSubagentsDir() 统一加载，
@@ -1572,16 +1715,95 @@ function registerIpcHandlers(): void {
         }
       }
 
-      // 无论历史/实时，都注册 tail 监听（历史模式之后仍然可以追加实时内容）
-      watcher.watchFile(payload.transcriptPath, payload.sessionId, false)
-      return { ok: true }
+      return { ok: true, resources: watcher.getResourceSnapshot() }
     } catch (err) {
+      jsonlWatcher?.releaseSessionConsumer(payload.sessionId, consumerId)
       console.error('[ipc] jsonl:watch failed:', err)
       return { ok: false, error: String(err) }
     }
   })
 
+  ipcMain.handle(IPC.JSONL_UNWATCH, async (
+    _event,
+    payload: { sessionId: string; consumerId: string; reason?: string }
+  ) => {
+    try {
+      const resources = getJsonlWatcher().releaseSessionConsumer(payload.sessionId, payload.consumerId)
+      console.info(
+        `[ipc] jsonl:unwatch session=${payload.sessionId.slice(0, 8)} consumer=${payload.consumerId} reason=${payload.reason ?? 'unspecified'}`,
+      )
+      return { ok: true, resources }
+    } catch (err) {
+      console.error('[ipc] jsonl:unwatch failed:', err)
+      return { ok: false, error: String(err) }
+    }
+  })
+
   // ── 历史 session 元数据扫描（T8）────────────────────────────────────────
+
+  ipcMain.handle(IPC.HISTORY_OPEN_PROJECT, async (_event, payload: HistoryOpenInput) => {
+    console.info(`[ipc] history:open-project request=${payload.requestId} project=${payload.projectId}`)
+    return getHistoryService().openProject(payload)
+  })
+
+  ipcMain.handle(IPC.HISTORY_CATALOG_CONTINUE, async (_event, payload: HistoryCatalogContinueInput) => {
+    return getHistoryService().continueCatalog(payload)
+  })
+
+  ipcMain.handle(IPC.HISTORY_DETAILS_LOAD, async (_event, payload: HistoryDetailsInput) => {
+    console.info(`[ipc] history:details-load request=${payload.requestId} detail=${payload.detailRequestId} cluster=${payload.clusterId.slice(0, 8)}`)
+    return getHistoryService().loadDetails(payload)
+  })
+
+  ipcMain.handle(IPC.HISTORY_SESSION_SEAL, async (_event, payload: HistorySessionSealInput) => {
+    console.info(
+      `[ipc] history:session-seal request=${payload.requestId} session=${payload.sessionId.slice(0, 8)}`,
+    )
+    return getHistoryService().sealSession(payload)
+  })
+
+  ipcMain.handle(IPC.HISTORY_DETAILS_CANCEL, async (_event, payload: { detailRequestId: string }) => {
+    getHistoryService().cancelDetailRequest(payload.detailRequestId)
+    return { ok: true }
+  })
+
+  ipcMain.handle(IPC.HISTORY_REQUEST_CANCEL, async (_event, payload: { requestId: string }) => {
+    getHistoryService().cancelRequest(payload.requestId)
+    return { ok: true }
+  })
+
+  ipcMain.handle(IPC.HISTORY_DELETE, async (_event, payload: HistoryDeleteInput) => {
+    console.info(`[ipc] history:delete operation=${payload.operationId} scope=${payload.scope} target=${payload.targetSessionId.slice(0, 8)}`)
+    return getHistoryService().deleteTarget(payload)
+  })
+
+  ipcMain.handle(IPC.HISTORY_TOKEN_INVENTORY, async (_event, payload: HistoryTokenInventoryInput) => {
+    console.info(`[ipc] history:token-inventory request=${payload.requestId} project=${payload.projectId}`)
+    return getHistoryService().scanTokenInventory(payload)
+  })
+
+  ipcMain.handle(IPC.RUNTIME_RESOURCE_SNAPSHOT, async (
+    _event,
+    payload?: { reason?: string },
+  ) => {
+    const mainMemory = await process.getProcessMemoryInfo()
+    const processes = app.getAppMetrics().map((metric) => ({
+      pid: metric.pid,
+      type: metric.type,
+      name: metric.name ?? metric.serviceName ?? null,
+      workingSetKb: metric.memory.workingSetSize,
+      privateKb: metric.memory.privateBytes ?? null,
+    }))
+    const snapshot = {
+      reason: payload?.reason ?? 'manual',
+      mainMemory,
+      watcher: jsonlWatcher?.getResourceSnapshot() ?? null,
+      history: historyService?.getResourceSnapshot() ?? null,
+      processes,
+    }
+    console.info(`[RuntimeResources] process snapshot ${JSON.stringify(snapshot)}`)
+    return snapshot
+  })
 
   ipcMain.handle(IPC.PROJECT_HISTORY_SCAN, async (
     _event,
@@ -2536,7 +2758,11 @@ function registerIpcHandlers(): void {
   })
 
   // 应用退出时标记，允许通知窗口真正关闭
-  app.on('before-quit', () => { isAppQuitting = true })
+  app.on('before-quit', () => {
+    isAppQuitting = true
+    historyService?.close()
+    jsonlWatcher?.close()
+  })
 
   // ── M6 S1 灵魂交流：在新 BrowserWindow 打开本地 HTML 文件 ─────────────────
   const webviewWindows = new Map<string, BrowserWindow>()
@@ -3231,8 +3457,14 @@ async function startServices(): Promise<void> {
         // ── PTY ↔ Claude Code session 绑定/解绑 ───────────────────────────────
         // SessionStart：找对应 PTY，建立绑定（若 autoWatch 已早期绑定则此处是重复绑定，无害）
         if (payload.hook_event_name === 'SessionStart') {
-          let ptyId = ptyManager.findSessionByCwd(payload.cwd)
           const alreadyBound = claudeToPtyMap.has(payload.session_id)
+          const resolution = resolveSessionStartPty(
+            payload.session_id,
+            payload.cwd,
+            claudeToPtyMap,
+            (cwd) => ptyManager.findSessionByCwd(cwd) ?? undefined,
+          )
+          let ptyId = resolution.ptyId
           // fallback：findSessionByCwd 可能因 cwd 编码问题（Windows GBK mojibake）返回 null，
           // 此时查找唯一未绑定的活跃 PTY 作为 fallback（单 session 场景下精确匹配）
           if (!ptyId && !alreadyBound) {
@@ -3246,7 +3478,7 @@ async function startServices(): Promise<void> {
           // 若找到的 PTY 已被其他 claudeId 绑定（如 branch session 在运行），跳过绑定
           // 此时 autoWatchTranscript 会用正确的新 PTY 建立绑定，避免破坏 branch 绑定
           const ptyAlreadyBoundToOther = ptyId ? (ptyToClaudeMap.has(ptyId) && ptyToClaudeMap.get(ptyId) !== payload.session_id) : false
-          console.log(`[PtyBind] SessionStart hook: claudeId=${payload.session_id} cwd=${payload.cwd} foundPty=${ptyId ?? 'NONE'} alreadyBound=${alreadyBound} ptyBoundToOther=${ptyAlreadyBoundToOther}`)
+          console.log(`[PtyBind] SessionStart hook: claudeId=${payload.session_id} cwd=${payload.cwd} foundPty=${ptyId ?? 'NONE'} source=${resolution.source} alreadyBound=${alreadyBound} ptyBoundToOther=${ptyAlreadyBoundToOther}`)
           if (ptyId && !ptyAlreadyBoundToOther) {
             bindPtyToClaudeSession(ptyId, payload.session_id, payload.transcript_path ?? '', payload.cwd)
           } else if (ptyAlreadyBoundToOther && ptyId) {

@@ -6,13 +6,14 @@
 import { useEffect } from 'react'
 import { useStore } from 'jotai'
 import { IPC } from '@shared/events/ipc-channels'
-import type { Project, Session, SessionHistoryMeta } from '@shared/types/index'
+import type { Project, Session, HistoryTokenInventoryResult } from '@shared/types/index'
 import { projectsAtom } from '../atoms/projects.atom'
 import { notificationQueueAtom } from '../atoms/notification.atom'
 import type { Notification } from '@shared/types/index'
 import { activeSessionsAtom } from '../atoms/session-core.atom'
 import { ptyBindingsAtom } from '../atoms/pty-binding.atom'
-import { updateSessionTokensFromFile } from '../capabilities/tokenCapability'
+import { upsertTokenInventory } from '../capabilities/tokenCapability'
+import { releaseSessionRuntime } from '../capabilities/runtimeResourceCapability'
 
 // 业务处理单元
 import { createPtyBindHandler } from '../business/ptyBindHandler'
@@ -24,6 +25,55 @@ import { createJsonlHandler } from '../business/jsonlHandler'
 import { createStatusLineHandler } from '../business/statusLineHandler'
 import { createPermissionHandler } from '../business/permissionHandler'
 import { createContextHandler } from '../business/contextHandler'
+
+type RendererStore = ReturnType<typeof useStore>
+
+let startupInventoryTask: Promise<void> | null = null
+let startupInventoryComplete = false
+
+/** React StrictMode 会重挂载根 effect；启动库存属于应用级工作，只允许一个 owner。 */
+export function ensureStartupTokenInventory(store: RendererStore): Promise<void> {
+  if (startupInventoryComplete) return Promise.resolve()
+  if (startupInventoryTask) {
+    console.debug('[IpcBridge] Reusing in-flight startup inventory task')
+    return startupInventoryTask
+  }
+
+  const task = (async (): Promise<void> => {
+    const raw = await window.api.invoke(IPC.PROJECT_LIST)
+    const projects = (raw as Project[]) ?? []
+    store.set(projectsAtom, new Map(projects.map((project) => [project.id, project])))
+    console.debug(`[IpcBridge] Loaded ${projects.length} projects`)
+
+    const claimed = projects.filter((project) => project.claimStatus === 1)
+    console.log(`[IpcBridge] Starting startup token scan for ${claimed.length} claimed projects`)
+    for (const project of claimed) {
+      try {
+        const requestId = crypto.randomUUID()
+        const result = await window.api.invoke(IPC.HISTORY_TOKEN_INVENTORY, {
+          projectId: project.id,
+          projectPath: project.path,
+          requestId,
+        }) as HistoryTokenInventoryResult
+        if (result.ok) {
+          upsertTokenInventory(store, result.entries)
+          console.log(`[IpcBridge] Token inventory loaded for ${result.entries.length} sessions in project "${project.name}"`)
+        } else if (result.errorCode !== 'HISTORY_CANCELLED') {
+          console.warn(`[IpcBridge] Token inventory failed for project "${project.name}": ${result.errorCode} ${result.error}`)
+        }
+      } catch (err) {
+        console.warn(`[IpcBridge] Startup token scan failed for project "${project.name}":`, err)
+      }
+    }
+    startupInventoryComplete = true
+  })()
+
+  const wrappedTask = task.finally(() => {
+    if (startupInventoryTask === wrappedTask) startupInventoryTask = null
+  })
+  startupInventoryTask = wrappedTask
+  return wrappedTask
+}
 
 export function useIpcBridge(): void {
   const store = useStore()
@@ -42,58 +92,8 @@ export function useIpcBridge(): void {
     const permission = createPermissionHandler(store)
     const context = createContextHandler(store)
 
-    // 加载项目列表，完成后对所有已认领项目做后台 token 全量扫描（填充全局统计）
-    void window.api.invoke(IPC.PROJECT_LIST).then(async (raw: unknown) => {
-      const projects = (raw as Project[]) ?? []
-      store.set(projectsAtom, new Map(projects.map((p) => [p.id, p])))
-      console.debug(`[IpcBridge] Loaded ${projects.length} projects`)
-
-      // 后台扫描：对已认领项目的全部历史 session 填充 sessionTokensAtom
-      // 这样全局监控面板启动后即可显示真实数据，无需先打开项目监控 tab
-      const claimed = projects.filter((p) => p.claimStatus === 1)
-      console.log(`[IpcBridge] Starting startup token scan for ${claimed.length} claimed projects`)
-      for (const project of claimed) {
-        try {
-          const metas = await window.api.invoke(IPC.PROJECT_HISTORY_SCAN, {
-            projectPath: project.path,
-            maxSessions: 50,
-          }) as SessionHistoryMeta[]
-
-          // 写入 activeSessionsAtom（只写不存在的 entry，防覆盖实时 session）
-          store.set(activeSessionsAtom, (prev) => {
-            const next = new Map(prev)
-            for (const meta of metas) {
-              if (next.has(meta.claudeId)) continue
-              next.set(meta.claudeId, {
-                id: meta.claudeId,
-                claudeId: meta.claudeId,
-                projectId: project.id,
-                status: 'Completed',
-                currentModel: null,
-                tokenUsage: { current: null, max: null, usedPercentage: null },
-                transcriptPath: meta.transcriptPath,
-                cwd: meta.cwd,
-                startedAt: meta.startedAt ?? meta.mtime,
-                endedAt: meta.mtime,
-                worktreePath: null,
-              })
-            }
-            return next
-          })
-
-          // 并发扫描 token
-          const withTranscript = metas.filter((m) => m.transcriptPath)
-          void Promise.allSettled(
-            withTranscript.map((meta) =>
-              updateSessionTokensFromFile(store, meta.claudeId, meta.transcriptPath)
-            )
-          )
-          console.log(`[IpcBridge] Token scan queued for ${withTranscript.length} sessions in project "${project.name}"`)
-        } catch (err) {
-          console.warn(`[IpcBridge] Startup token scan failed for project "${project.name}":`, err)
-        }
-      }
-    }).catch((err: unknown) => {
+    // 后台扫描属于应用级初始化；StrictMode 重挂载复用同一个 promise。
+    void ensureStartupTokenInventory(store).catch((err: unknown) => {
       console.error('[IpcBridge] Failed to load projects:', err)
     })
 
@@ -142,6 +142,9 @@ export function useIpcBridge(): void {
           })
           return next
         })
+        if (status === 'Completed' || status === 'Interrupted') {
+          releaseSessionRuntime(store, claudeId, { mode: 'handoff', reason: `session-status:${status}` })
+        }
       })
     )
 

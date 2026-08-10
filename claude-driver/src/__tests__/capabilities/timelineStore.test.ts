@@ -14,7 +14,11 @@ import {
   getTimelineLength,
   clearTimeline,
 } from '@renderer/capabilities/timelineStore'
-import { timelineBySessionAtom, lineInsertionsBySessionAtom } from '@renderer/atoms/timeline.atom'
+import {
+  timelineBySessionAtom,
+  lineInsertionsBySessionAtom,
+  timelineInsertionSignalAtom,
+} from '@renderer/atoms/timeline.atom'
 import type { TimelineNode } from '@renderer/atoms/timeline.atom'
 import type { LineInsertion } from '@shared/types/lineInsertion'
 import type { PtyBindings } from '@renderer/atoms/pty-binding.atom'
@@ -80,6 +84,14 @@ describe('K1: appendTimelineNode', () => {
     expect(store.get(timelineBySessionAtom('c1'))).toHaveLength(1)
     expect(store.get(timelineBySessionAtom('c2'))).toHaveLength(1)
   })
+
+  it('仅真正追加实时节点时发布自动 fitView 信号', () => {
+    appendTimelineNode(store, 'c1', makeNode({ id: 'n1' }))
+    const first = store.get(timelineInsertionSignalAtom)
+    appendTimelineNode(store, 'c1', makeNode({ id: 'n1' }))
+    expect(first).toMatchObject({ sessionId: 'c1', sequence: 1 })
+    expect(store.get(timelineInsertionSignalAtom)).toEqual(first)
+  })
 })
 
 // ── K2: appendTimelineNodes ──────────────────────────────────────────────────
@@ -96,6 +108,11 @@ describe('K2: appendTimelineNodes', () => {
     appendTimelineNodes(store, 'c1', [])
     expect(store.get(timelineBySessionAtom('c1'))).toHaveLength(1)
   })
+
+  it('历史批量回放不发布自动 fitView 信号', () => {
+    appendTimelineNodes(store, 'c1', [makeNode({ id: 'history-node' })])
+    expect(store.get(timelineInsertionSignalAtom)).toBeNull()
+  })
 })
 
 // ── K3: appendInsertion ──────────────────────────────────────────────────────
@@ -106,6 +123,7 @@ describe('K3: appendInsertion', () => {
     appendInsertion(store, 'c1', ins)
     expect(store.get(lineInsertionsBySessionAtom('c1'))).toHaveLength(1)
     expect(store.get(lineInsertionsBySessionAtom('c1'))[0]).toEqual(ins)
+    expect(store.get(timelineInsertionSignalAtom)).toMatchObject({ sessionId: 'c1', sequence: 1 })
   })
 })
 

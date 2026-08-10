@@ -20,9 +20,10 @@ import {
   isRealtimeVisible,
 } from '@renderer/capabilities/realtimeVisibility'
 import { activeSessionsAtom } from '@renderer/atoms/session-core.atom'
-import { pendingPtyStartsAtom } from '@renderer/atoms/pending-starts.atom'
+import { pendingPtyStartsAtom, type PendingPtyStart } from '@renderer/atoms/pending-starts.atom'
 import { pathMatches } from '@renderer/utils/pathUtils'
 import type { TestStore } from '../../../__tests__/helpers/createTestStore'
+import { releaseSessionRuntime } from '@renderer/capabilities/runtimeResourceCapability'
 
 type Store = Pick<TestStore, 'get' | 'set'>
 
@@ -39,7 +40,36 @@ interface PtyUnbindPayload {
   claudeId: string
 }
 
-export function createPtyBindHandler(store: Store) {
+interface PtyBindHandler {
+  register(): Array<() => void>
+  handleBind(payload: PtyBindPayload): void
+  handleUnbind(payload: PtyUnbindPayload): void
+}
+
+interface PendingStartMatch {
+  pendingCwd: string
+  pending: PendingPtyStart
+}
+
+export function createPtyBindHandler(store: Store): PtyBindHandler {
+  function findPendingStart(cwd: string | undefined, ptyId?: string): PendingStartMatch | undefined {
+    if (!cwd) return undefined
+    for (const [pendingCwd, pending] of store.get(pendingPtyStartsAtom)) {
+      if (pathMatches(cwd, pendingCwd) && (!ptyId || pending.ptyId === ptyId)) {
+        return { pendingCwd, pending }
+      }
+    }
+    return undefined
+  }
+
+  function consumePendingStart(pendingCwd: string): void {
+    store.set(pendingPtyStartsAtom, (prev) => {
+      const next = new Map(prev)
+      next.delete(pendingCwd)
+      return next
+    })
+  }
+
   function handleBind(payload: PtyBindPayload): void {
     const { ptyId, claudeId, transcriptPath, cwd, projectId: payloadProjectId } = payload
 
@@ -49,14 +79,55 @@ export function createPtyBindHandler(store: Store) {
     const byClaude = getSession(store, claudeId)
 
     if (byClaude) {
+      // SessionStart 已创建真实条目，但早期 PTY 占位仍可能因 IPC 时序残留。
+      // 真实 PTY_BIND 同时携带精确 ptyId + claudeId，可安全地按 ptyId 原子收敛，
+      // 不能按 cwd 猜测删除（同项目允许多个并行 Agent）。
+      let duplicatePlaceholder: Session | undefined
+      if (ptyId !== claudeId) {
+        const byPtyId = getSession(store, ptyId)
+        if (byPtyId?.isPtyPlaceholder && byPtyId.claudeId === ptyId) {
+          duplicatePlaceholder = byPtyId
+          store.set(activeSessionsAtom, (prev) => {
+            if (prev.get(ptyId) !== byPtyId) return prev
+            const next = new Map(prev)
+            next.delete(ptyId)
+            return next
+          })
+          if (isRealtimeVisible(store, ptyId)) removeFromRealtime(store, ptyId)
+          console.info(
+            `[BL-1] PTY_BIND reconciled duplicate placeholder: ptyId=${ptyId.slice(0,8)} claudeId=${claudeId.slice(0,8)}`,
+          )
+        }
+
+        const pending = findPendingStart(cwd, ptyId)
+        if (pending) {
+          consumePendingStart(pending.pendingCwd)
+          console.info(
+            `[BL-1] PTY_BIND consumed resolved pending: ptyId=${ptyId.slice(0,8)} projectId=${pending.pending.projectId}`,
+          )
+        }
+      }
+
       // 路径 B：entry 已以 claudeId 为 key 存在（SessionStart Hook 或 branchHandler 创建），
-      //         只更新 id（ptyId）/ transcriptPath / cwd
+      //         更新 id（ptyId）/ transcriptPath / cwd。
+      // claude --resume 不触发 SessionStart Hook；若旧 entry 已终止，PTY_BIND 就是恢复运行态
+      // 与实时输入能力的唯一事实源。Paused/Running 的重复绑定保持原状态，避免 catch-up 误改。
+      const resumesTerminalSession = byClaude.status === 'Completed' || byClaude.status === 'Interrupted'
+      const reconciledProjectId = byClaude.projectId || duplicatePlaceholder?.projectId || payloadProjectId
       patchSession(store, claudeId, {
         id: ptyId,
         claudeId,
+        isPtyPlaceholder: false,
+        ...(reconciledProjectId ? { projectId: reconciledProjectId } : {}),
+        ...(resumesTerminalSession ? { status: 'Running', endedAt: null } : {}),
         ...(transcriptPath ? { transcriptPath } : {}),
         ...(cwd ? { cwd } : {}),
       })
+      if (resumesTerminalSession) {
+        console.info(
+          `[BL-1] PTY_BIND resumed terminal session: claudeId=${claudeId.slice(0,8)} previous=${byClaude.status} ptyId=${ptyId.slice(0,8)}`,
+        )
+      }
       if (!isRealtimeVisible(store, claudeId)) {
         addToRealtime(store, claudeId)
       }
@@ -69,7 +140,8 @@ export function createPtyBindHandler(store: Store) {
       //       此时需要将 ptyId-keyed entry 迁移到 claudeId-keyed
       if (ptyId !== claudeId) {
         const byPtyId = getSession(store, ptyId)
-        if (byPtyId && byPtyId.claudeId === ptyId) {
+        if (byPtyId?.isPtyPlaceholder && byPtyId.claudeId === ptyId) {
+          const pending = findPendingStart(cwd, ptyId)
           // 找到占位 entry，迁移到真实 claudeId
           store.set(activeSessionsAtom, (prev) => {
             const next = new Map(prev)
@@ -78,6 +150,8 @@ export function createPtyBindHandler(store: Store) {
               ...byPtyId,
               claudeId,
               id: ptyId,
+              isPtyPlaceholder: false,
+              projectId: payloadProjectId ?? pending?.pending.projectId ?? byPtyId.projectId,
               ...(transcriptPath ? { transcriptPath } : {}),
               ...(cwd ? { cwd } : {}),
             })
@@ -88,6 +162,7 @@ export function createPtyBindHandler(store: Store) {
             removeFromRealtime(store, ptyId)
           }
           addToRealtime(store, claudeId)
+          if (pending) consumePendingStart(pending.pendingCwd)
           console.log(`[BL-1] PTY_BIND migrated: ${ptyId.slice(0,8)} → ${claudeId.slice(0,8)}`)
           console.log(`[BL-1] PTY_BIND: PTY ${ptyId} ↔ Claude ${claudeId}`)
           return
@@ -95,20 +170,16 @@ export function createPtyBindHandler(store: Store) {
       }
 
       // 优先从 pendingPtyStartsAtom 补全 projectId（避免 SESSION_START 后 Hook 迟到时 projectId 为空）
-      const pendingMap = store.get(pendingPtyStartsAtom)
-      let pendingProjectId: string | undefined
-      for (const [pendingCwd, p] of pendingMap) {
-        const matchCwd = cwd ?? ''
-        if (pathMatches(matchCwd, pendingCwd)) {
-          pendingProjectId = p.projectId
-          store.set(pendingPtyStartsAtom, (prev) => {
-            const m = new Map(prev)
-            m.delete(pendingCwd)
-            return m
-          })
-          console.log(`[BL-1] PTY_BIND path C: consumed pending projectId=${pendingProjectId} for cwd=${matchCwd}`)
-          break
-        }
+      const pending = findPendingStart(cwd, ptyId)
+      const pendingProjectId = pending?.pending.projectId
+      const isTemporaryPlaceholder = ptyId === claudeId && Boolean(payloadProjectId)
+      if (pending && !isTemporaryPlaceholder) {
+        consumePendingStart(pending.pendingCwd)
+        console.log(`[BL-1] PTY_BIND path C: consumed pending projectId=${pendingProjectId} for cwd=${cwd ?? ''}`)
+      } else if (isTemporaryPlaceholder) {
+        console.info(
+          `[BL-1] PTY_BIND placeholder retained pending correlation: ptyId=${ptyId.slice(0,8)} projectId=${payloadProjectId}`,
+        )
       }
 
       const newSession: Session = {
@@ -123,6 +194,7 @@ export function createPtyBindHandler(store: Store) {
         startedAt: Date.now(),
         endedAt: null,
         worktreePath: null,
+        isPtyPlaceholder: isTemporaryPlaceholder,
       }
       createSession(store, claudeId, newSession)
       addToRealtime(store, claudeId)
@@ -135,6 +207,7 @@ export function createPtyBindHandler(store: Store) {
     unbindPty(store, payload.ptyId, payload.claudeId)
     // PTY 解绑时同步清理 ptySessionIdsAtom，确保 runningProjectsAtom 重新计算
     removeFromRealtime(store, payload.claudeId)
+    releaseSessionRuntime(store, payload.claudeId, { mode: 'handoff', reason: 'pty-unbind' })
     console.log(`[BL-1] PTY_UNBIND: PTY ${payload.ptyId} unbound from Claude ${payload.claudeId}`)
   }
 
