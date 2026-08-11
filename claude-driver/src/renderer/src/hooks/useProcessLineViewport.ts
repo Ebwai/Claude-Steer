@@ -9,9 +9,11 @@ import { activeSessionsAtom } from '../atoms/sessions.atom'
 import type { FrameLayout } from './useSessionFrameLayout'
 import {
   HISTORY_BOTTOM_FOLLOW_DURATION_MS,
+  HISTORY_BOTTOM_CAMERA_DURATION_MS,
   HISTORY_CAMERA_DURATION_MS,
   HISTORY_CAMERA_INTERPOLATE,
   canHistoryCameraOwnerPreempt,
+  computeHistoryBottomCameraTarget,
   computeHistoryCameraTarget,
   easeOutCubic,
   evaluateHistoryBottomFollow,
@@ -23,6 +25,7 @@ import {
   type SessionCameraAnchor,
   type ViewportLike,
 } from './historyViewportMath'
+import type { HistoryFrameEdge } from './historyArrowMultiTap'
 import type { HistoryInteractionPhase, HistoryNavigationDirection } from './historyWorkingSet'
 
 const OVERVIEW_FITVIEW_DELAY_MS = 500
@@ -46,6 +49,7 @@ interface ViewportControl {
   onUserMoveEnd: (event?: MouseEvent | TouchEvent | null) => void
   onEscapeToFollow: () => void
   focusSession: (sessionId: string) => void
+  focusSessionEdge: (sessionId: string, edge: HistoryFrameEdge, source?: string) => void
   unfocusSession: () => void
   cancelNavigation: () => void
   interactionPhase: HistoryInteractionPhase
@@ -178,12 +182,17 @@ export function useProcessLineViewport(
     else if (!hasRunning && mode === 'follow') setMode('overview')
   }, [activeSessionIds, activeSessions, mode, setMode])
 
-  const focusSession = useCallback((sessionId: string) => {
+  const focusSessionEdge = useCallback((sessionId: string, edge: HistoryFrameEdge, source = 'navigation') => {
     const flow = flowRef.current
     const container = canvasContainerRef.current
     const layout = layouts.find((item) => item.sessionId === sessionId)
     if (!flow || !container || !layout || container.clientWidth <= 0 || container.clientHeight <= 0) {
-      console.warn(`[Viewport] fixed-camera skipped session=${sessionId.slice(0, 8)} flow=${!!flow} container=${!!container} layout=${!!layout}`)
+      console.warn(`[Viewport] edge-camera skipped edge=${edge} source=${source} session=${sessionId.slice(0, 8)} reason=missing-geometry flow=${!!flow} container=${!!container} layout=${!!layout}`)
+      return
+    }
+    const frameHeight = edge === 'bottom' ? frameHeights.get(sessionId) : undefined
+    if (edge === 'bottom' && frameHeight === undefined) {
+      console.warn(`[Viewport] edge-camera skipped edge=bottom source=${source} session=${sessionId.slice(0, 8)} reason=missing-height`)
       return
     }
 
@@ -200,22 +209,23 @@ export function useProcessLineViewport(
     const previousOwner = cameraOwnerRef.current
     if (!canHistoryCameraOwnerPreempt(previousOwner, 'explicit')) {
       console.debug(
-        `[Viewport] fixed-camera skipped by owner=${previousOwner} session=${sessionId.slice(0, 8)}`,
+        `[Viewport] edge-camera skipped edge=${edge} source=${source} by owner=${previousOwner} session=${sessionId.slice(0, 8)}`,
       )
       return
     }
     cameraOwnerRef.current = 'explicit'
-    resetBottomFollowBaseline('explicit-focus')
+    resetBottomFollowBaseline(`explicit-${edge}`)
     if (previousOwner === 'bottom-follow') {
       console.info(`[Viewport] camera preempt owner=bottom-follow by=explicit session=${sessionId.slice(0, 8)}`)
     }
     cancelAnimation()
     const token = animationTokenRef.current
     const intentAt = performance.now()
-    const targetViewport = computeHistoryCameraTarget(layout, {
-      width: container.clientWidth,
-      height: container.clientHeight,
-    })
+    const viewportSize = { width: container.clientWidth, height: container.clientHeight }
+    const targetViewport = edge === 'top'
+      ? computeHistoryCameraTarget(layout, viewportSize)
+      : computeHistoryBottomCameraTarget(layout, frameHeight!, viewportSize)
+    const duration = edge === 'top' ? HISTORY_CAMERA_DURATION_MS : HISTORY_BOTTOM_CAMERA_DURATION_MS
     if (programmaticResetTimerRef.current) {
       clearTimeout(programmaticResetTimerRef.current)
       programmaticResetTimerRef.current = null
@@ -238,12 +248,12 @@ export function useProcessLineViewport(
       const startViewport = flow.getViewport()
       viewportAnimationActiveRef.current = true
       console.info(
-        `[Viewport] fixed-camera start token=${token} session=${sessionId.slice(0, 8)} direction=${direction ?? 'same'} interpolate=${HISTORY_CAMERA_INTERPOLATE} prepare=${(performance.now() - intentAt).toFixed(1)}ms distance=${Math.hypot(targetViewport.x - startViewport.x, targetViewport.y - startViewport.y).toFixed(0)}px from=(${startViewport.x.toFixed(0)},${startViewport.y.toFixed(0)},${startViewport.zoom.toFixed(3)}) to=(${targetViewport.x.toFixed(0)},${targetViewport.y.toFixed(0)},${targetViewport.zoom.toFixed(3)})`,
+        `[Viewport] edge-camera start token=${token} edge=${edge} source=${source} session=${sessionId.slice(0, 8)} direction=${direction ?? 'same'} interpolate=${HISTORY_CAMERA_INTERPOLATE} prepare=${(performance.now() - intentAt).toFixed(1)}ms distance=${Math.hypot(targetViewport.x - startViewport.x, targetViewport.y - startViewport.y).toFixed(0)}px from=(${startViewport.x.toFixed(0)},${startViewport.y.toFixed(0)},${startViewport.zoom.toFixed(3)}) to=(${targetViewport.x.toFixed(0)},${targetViewport.y.toFixed(0)},${targetViewport.zoom.toFixed(3)})`,
       )
 
       // 使用 React Flow 内建过渡；不在 React 层逐帧提交 viewport。
       void Promise.resolve(flow.setViewport(targetViewport, {
-        duration: HISTORY_CAMERA_DURATION_MS,
+        duration,
         ease: easeOutCubic,
         interpolate: HISTORY_CAMERA_INTERPOLATE,
       })).then(() => {
@@ -257,7 +267,7 @@ export function useProcessLineViewport(
           setTargetSessionId(null)
           setInteractionPhase('idle')
           onHistoryInteractionBlocked?.(false)
-          console.info(`[Viewport] fixed-camera settled token=${token} session=${sessionId.slice(0, 8)}`)
+          console.info(`[Viewport] edge-camera settled token=${token} edge=${edge} source=${source} session=${sessionId.slice(0, 8)}`)
         }, 80)
       }).catch((error) => {
         if (!isHistoryCameraOperationCurrent(cameraOwnerRef.current, animationTokenRef.current, 'explicit', token)) return
@@ -267,10 +277,14 @@ export function useProcessLineViewport(
         setTargetSessionId(null)
         setInteractionPhase('idle')
         onHistoryInteractionBlocked?.(false)
-        console.error(`[Viewport] fixed-camera failed token=${token} session=${sessionId.slice(0, 8)}:`, error)
+        console.error(`[Viewport] edge-camera failed token=${token} edge=${edge} source=${source} session=${sessionId.slice(0, 8)}:`, error)
       })
     })
-  }, [flowRef, canvasContainerRef, layouts, targetSessionId, focusedId, cancelAnimation, resetBottomFollowBaseline, setFocusedId, setMode, onHistoryInteractionBlocked])
+  }, [flowRef, canvasContainerRef, layouts, frameHeights, targetSessionId, focusedId, cancelAnimation, resetBottomFollowBaseline, setFocusedId, setMode, onHistoryInteractionBlocked])
+
+  const focusSession = useCallback((sessionId: string) => {
+    focusSessionEdge(sessionId, 'top', 'focus')
+  }, [focusSessionEdge])
 
   const scheduleFixedFocus = useCallback((sessionId: string): void => {
     if (autoFocusFrameRef.current !== null) cancelAnimationFrame(autoFocusFrameRef.current)
@@ -492,6 +506,7 @@ export function useProcessLineViewport(
     onUserMoveEnd,
     onEscapeToFollow,
     focusSession,
+    focusSessionEdge,
     unfocusSession,
     cancelNavigation,
     interactionPhase,

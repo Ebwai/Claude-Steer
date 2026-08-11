@@ -60,6 +60,9 @@ export const HISTORY_FRAME_TOP_GAP = 24
 export const HISTORY_MIN_ZOOM = 0.1
 export const HISTORY_MAX_ZOOM = 3
 export const HISTORY_CAMERA_DURATION_MS = 260
+export const HISTORY_BOTTOM_FRAME_VIEWPORT_RATIO = 0.9
+export const HISTORY_BOTTOM_FRAME_POSITION_RATIO = 0.75
+export const HISTORY_BOTTOM_CAMERA_DURATION_MS = 350
 export const HISTORY_FRAME_BOTTOM_GAP = HISTORY_FRAME_TOP_GAP
 export const HISTORY_BOTTOM_FOLLOW_DURATION_MS = 160
 export const HISTORY_BOTTOM_FOLLOW_EPSILON_PX = 1
@@ -111,6 +114,28 @@ export function computeHistoryCameraTarget(
     zoom,
     x: width / 2 - (layout.x + frameWidth / 2) * zoom,
     y: HISTORY_FRAME_TOP_GAP - layout.y * zoom,
+  }
+}
+
+/** 消息发送与 ↓↓ 共用的既有底部构图；frameHeight 与 layout 均为世界坐标。 */
+export function computeHistoryBottomCameraTarget(
+  layout: FramePosition,
+  frameHeight: number,
+  viewportSize: ViewportSize,
+): ViewportLike {
+  const width = Math.max(0, viewportSize.width)
+  const height = Math.max(0, viewportSize.height)
+  const frameWidth = Math.max(1, layout.width)
+  const safeFrameHeight = Math.max(1, frameHeight)
+  const zoom = clamp(
+    (width * HISTORY_BOTTOM_FRAME_VIEWPORT_RATIO) / frameWidth,
+    HISTORY_MIN_ZOOM,
+    HISTORY_MAX_ZOOM,
+  )
+  return {
+    zoom,
+    x: width / 2 - (layout.x + frameWidth / 2) * zoom,
+    y: height * HISTORY_BOTTOM_FRAME_POSITION_RATIO - (layout.y + safeFrameHeight) * zoom,
   }
 }
 

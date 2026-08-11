@@ -8,7 +8,11 @@ import { act, renderHook } from '@testing-library/react'
 import { Provider } from 'jotai'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { focusedSessionIdAtom, viewportModeAtom } from '@renderer/atoms/viewport.atom'
-import { HISTORY_BOTTOM_FOLLOW_DURATION_MS, HISTORY_CAMERA_DURATION_MS } from '@renderer/hooks/historyViewportMath'
+import {
+  HISTORY_BOTTOM_CAMERA_DURATION_MS,
+  HISTORY_BOTTOM_FOLLOW_DURATION_MS,
+  HISTORY_CAMERA_DURATION_MS,
+} from '@renderer/hooks/historyViewportMath'
 import { useProcessLineViewport } from '@renderer/hooks/useProcessLineViewport'
 import type { FrameLayout } from '@renderer/hooks/useSessionFrameLayout'
 import { createTestStore } from '../helpers/createTestStore'
@@ -172,5 +176,78 @@ describe('useProcessLineViewport camera arbitration', () => {
       { x: 360, y: 66, zoom: 0.5 },
       expect.objectContaining({ duration: HISTORY_BOTTOM_FOLLOW_DURATION_MS }),
     )
+  })
+
+  it('routes the shared bottom edge through the explicit camera transaction', async () => {
+    const store = createTestStore()
+    store.set(viewportModeAtom, 'focus')
+    store.set(focusedSessionIdAtom, 'main')
+    const container = document.createElement('div')
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 1200 })
+    Object.defineProperty(container, 'clientHeight', { configurable: true, value: 800 })
+    const viewport = { x: 0, y: 0, zoom: 1 }
+    const setViewport = vi.fn(() => Promise.resolve())
+    const flowRef = {
+      current: { fitView: vi.fn(), getViewport: vi.fn(() => viewport), setViewport },
+    } as Parameters<typeof useProcessLineViewport>[0]
+    const containerRef = { current: container } as Parameters<typeof useProcessLineViewport>[3]
+    const wrapper = ({ children }: { children: ReactNode }): React.JSX.Element => (
+      <Provider store={store}>{children}</Provider>
+    )
+    const { result } = renderHook(() => useProcessLineViewport(
+      flowRef,
+      ['main'],
+      [{ sessionId: 'main', x: 100, y: 40, width: 1500 }],
+      containerRef,
+      new Map([['main', 1000]]),
+      null,
+      null,
+      [],
+    ), { wrapper })
+
+    act(() => result.current.focusSessionEdge('main', 'bottom', 'test'))
+    await act(async () => {
+      vi.advanceTimersByTime(1)
+      await Promise.resolve()
+    })
+
+    expect(setViewport).toHaveBeenCalledWith(
+      expect.objectContaining({ x: -12, y: expect.closeTo(-148.8), zoom: 0.72 }),
+      expect.objectContaining({ duration: HISTORY_BOTTOM_CAMERA_DURATION_MS, interpolate: 'linear' }),
+    )
+  })
+
+  it('skips bottom edge positioning when no measured frame height exists', async () => {
+    const store = createTestStore()
+    store.set(viewportModeAtom, 'focus')
+    store.set(focusedSessionIdAtom, 'main')
+    const container = document.createElement('div')
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 1200 })
+    Object.defineProperty(container, 'clientHeight', { configurable: true, value: 800 })
+    const setViewport = vi.fn(() => Promise.resolve())
+    const flowRef = {
+      current: { fitView: vi.fn(), getViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 1 })), setViewport },
+    } as Parameters<typeof useProcessLineViewport>[0]
+    const containerRef = { current: container } as Parameters<typeof useProcessLineViewport>[3]
+    const wrapper = ({ children }: { children: ReactNode }): React.JSX.Element => (
+      <Provider store={store}>{children}</Provider>
+    )
+    const { result } = renderHook(() => useProcessLineViewport(
+      flowRef,
+      ['main'],
+      [{ sessionId: 'main', x: 100, y: 40, width: 1500 }],
+      containerRef,
+      new Map(),
+      null,
+      null,
+      [],
+    ), { wrapper })
+
+    act(() => result.current.focusSessionEdge('main', 'bottom', 'test'))
+    await act(async () => {
+      vi.advanceTimersByTime(1)
+      await Promise.resolve()
+    })
+    expect(setViewport).not.toHaveBeenCalled()
   })
 })

@@ -1,102 +1,209 @@
-// 使用方法：在 ProcessLineCanvasInner 内调用 useGlobalKeyNav(rf, layouts, relationsMap)
+// 使用方法：在 ProcessLineCanvasInner 内调用；全局 ↑↓ 游标、↑↑/↓↓ 边界相机、←→ 框跳转
 // 编译说明：renderer 进程 browser bundle
-// 代码说明：全局键盘导航 Hook——↑↓ 框内精细游标 + 视口微平移；←→ 框间跳转（cluster小跳/跨cluster大跳）
 
 import { useEffect, useCallback, useRef } from 'react'
 import { useStore } from 'jotai'
 import type { ReactFlowInstance } from '@xyflow/react'
-import { focusedSessionIdAtom } from '../atoms/viewport.atom'
-import { nodeJumpRequestAtom } from '../atoms/viewport.atom'
+import { focusedSessionIdAtom, nodeJumpRequestAtom } from '../atoms/viewport.atom'
 import { timelineBySessionAtom, lineInsertionsBySessionAtom, cursorNodeIndexAtom, scrubberIndexAtom } from '../atoms/timeline.atom'
 import { sessionRelationsAtom } from '../atoms/sessions.atom'
 import { buildJumpableNodes } from '../capabilities/jumpableNodes'
 import type { FrameLayout } from './useSessionFrameLayout'
 import { resolveHistoryHorizontalTarget } from './historyHorizontalNavigation'
+import {
+  IDLE_ARROW_MULTI_TAP_STATE,
+  arrowMultiTapDeadline,
+  transitionArrowMultiTap,
+  type ArrowMultiTapAction,
+  type ArrowMultiTapState,
+  type ArrowMultiTapTransition,
+  type HistoryFrameEdge,
+  type VerticalArrowKey,
+} from './historyArrowMultiTap'
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT' ||
+    target.isContentEditable
+}
 
 export function useGlobalKeyNav(
   rf: ReactFlowInstance,
   layouts: FrameLayout[],
   focusSession: (sessionId: string) => void,
+  focusSessionEdge: (sessionId: string, edge: HistoryFrameEdge, source?: string) => void,
   canvasContainerRef: React.RefObject<HTMLDivElement | null>,
+  scopeKey: string | null,
 ): void {
   const store = useStore()
-  // 记录最近一次 cursor 节点 DOM 的屏幕 Y，用于视口微平移补偿
-  const lastCursorScreenYRef = useRef<number | null>(null)
+  const multiTapStateRef = useRef<ArrowMultiTapState>(IDLE_ARROW_MULTI_TAP_STATE)
+  const multiTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const commitTransitionRef = useRef<(transition: ArrowMultiTapTransition) => void>(() => undefined)
 
-  // ── ←→ 框间导航 ──────────────────────────────────────────────────────────
+  const moveVertical = useCallback((key: VerticalArrowKey): void => {
+    const focusedId = store.get(focusedSessionIdAtom) ?? layouts[0]?.sessionId
+    if (!focusedId) return
 
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // 只在画布容器获焦时响应（防止与输入框冲突）
-    const target = e.target as HTMLElement
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+    const timelineNodes = store.get(timelineBySessionAtom(focusedId))
+    const insertions = store.get(lineInsertionsBySessionAtom(focusedId))
+    const jumpable = buildJumpableNodes(timelineNodes, insertions)
+    if (jumpable.length === 0) return
 
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      e.preventDefault()
+    const cur = store.get(cursorNodeIndexAtom(focusedId))
+    const next = key === 'ArrowDown'
+      ? Math.min(cur < 0 ? 0 : cur + 1, jumpable.length - 1)
+      : Math.max(cur < 0 ? jumpable.length - 1 : cur - 1, 0)
+    const target = jumpable[next]
+    if (!target) return
+
+    store.set(cursorNodeIndexAtom(focusedId), next)
+    const userInputs = timelineNodes.filter((node) => node.type === 'user_input')
+    if (target.type === 'user_input') {
+      const userInputIndex = userInputs.findIndex((node) => node.id === target.id)
+      if (userInputIndex >= 0) store.set(scrubberIndexAtom(focusedId), userInputIndex)
+    }
+    store.set(nodeJumpRequestAtom, { sessionId: focusedId, nodeId: target.id, ts: Date.now() })
+    console.log(`[KeyNav] ↑↓ cursor=${next} nodeId=${target.id.slice(0, 8)} type=${target.type}`)
+
+    requestAnimationFrame(() => {
+      const element = document.querySelector<HTMLElement>(`[data-nodeid="${target.id}"]`)
+      const container = canvasContainerRef.current
+      if (!element || !container) return
+      const canvasRect = container.getBoundingClientRect()
+      const newScreenY = element.getBoundingClientRect().top + element.clientHeight / 2
+      const desiredScreenY = canvasRect.top + canvasRect.height / 2
+      const delta = newScreenY - desiredScreenY
+      if (Math.abs(delta) < 5) return
+      const viewport = rf.getViewport()
+      void rf.setViewport({ ...viewport, y: viewport.y - delta }, { duration: 100 })
+    })
+  }, [canvasContainerRef, layouts, rf, store])
+
+  const executeActions = useCallback((actions: readonly ArrowMultiTapAction[]): void => {
+    for (const action of actions) {
+      if (action.type === 'single') {
+        moveVertical(action.key)
+        continue
+      }
+      const focusedId = store.get(focusedSessionIdAtom) ?? layouts[0]?.sessionId
+      if (!focusedId) {
+        console.warn(`[KeyNav] double-tap edge=${action.edge} skipped reason=no-anchor`)
+        continue
+      }
+      console.info(`[KeyNav] double-tap confirmed edge=${action.edge} session=${focusedId.slice(0, 8)}`)
+      focusSessionEdge(focusedId, action.edge, 'keyboard-double-tap')
+    }
+  }, [focusSessionEdge, layouts, moveVertical, store])
+
+  const commitTransition = useCallback((transition: ArrowMultiTapTransition): void => {
+    if (multiTapTimerRef.current) {
+      clearTimeout(multiTapTimerRef.current)
+      multiTapTimerRef.current = null
+    }
+    multiTapStateRef.current = transition.state
+    executeActions(transition.actions)
+    if (transition.reason !== 'repeat' && transition.reason !== 'unmatched-keyup') {
+      console.debug(`[KeyNav] multi-tap reason=${transition.reason} phase=${transition.state.phase}`)
+    }
+    const deadline = arrowMultiTapDeadline(transition.state)
+    if (deadline === null) return
+    // +1ms 保留规范中的“恰好 200ms 仍有效”边界。
+    const delay = Math.max(0, deadline - performance.now() + 1)
+    multiTapTimerRef.current = setTimeout(() => {
+      multiTapTimerRef.current = null
+      commitTransitionRef.current(transitionArrowMultiTap(multiTapStateRef.current, {
+        type: 'timeout',
+        now: performance.now(),
+      }))
+    }, delay)
+  }, [executeActions])
+  useEffect(() => {
+    commitTransitionRef.current = commitTransition
+  }, [commitTransition])
+
+  const interruptCandidate = useCallback((flushPending: boolean): void => {
+    if (multiTapStateRef.current.phase === 'idle') return
+    commitTransition(transitionArrowMultiTap(multiTapStateRef.current, {
+      type: 'interrupt',
+      flushPending,
+    }))
+  }, [commitTransition])
+
+  const handleKeyDown = useCallback((event: KeyboardEvent): void => {
+    if (isEditableTarget(event.target)) {
+      interruptCandidate(false)
+      return
+    }
+
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      interruptCandidate(false)
+      event.preventDefault()
       const currentId = store.get(focusedSessionIdAtom) ?? layouts[0]?.sessionId
       if (!currentId) return
-      const direction = e.key === 'ArrowLeft' ? 'left' : 'right'
+      const direction = event.key === 'ArrowLeft' ? 'left' : 'right'
       const relations = store.get(sessionRelationsAtom)
       const nextId = resolveHistoryHorizontalTarget(currentId, direction, layouts, relations)
       if (nextId) {
-        console.log(`[KeyNav] ←→ ${currentId.slice(0,8)} → ${nextId.slice(0,8)} (${direction})`)
+        console.log(`[KeyNav] ←→ ${currentId.slice(0, 8)} → ${nextId.slice(0, 8)} (${direction})`)
         focusSession(nextId)
       } else {
-        console.info(`[KeyNav] boundary current=${currentId.slice(0,8)} direction=${direction} relation=${relations.get(currentId)?.type ?? 'root'}`)
+        console.info(`[KeyNav] boundary current=${currentId.slice(0, 8)} direction=${direction} relation=${relations.get(currentId)?.type ?? 'root'}`)
       }
       return
     }
 
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      e.preventDefault()
-      const focusedId = store.get(focusedSessionIdAtom) ?? layouts[0]?.sessionId
-      if (!focusedId) return
-
-      const timelineNodes = store.get(timelineBySessionAtom(focusedId))
-      const insertions    = store.get(lineInsertionsBySessionAtom(focusedId))
-      const jumpable      = buildJumpableNodes(timelineNodes, insertions)
-      if (jumpable.length === 0) return
-
-      const cur  = store.get(cursorNodeIndexAtom(focusedId))
-      const next = e.key === 'ArrowDown'
-        ? Math.min(cur < 0 ? 0 : cur + 1, jumpable.length - 1)
-        : Math.max(cur < 0 ? jumpable.length - 1 : cur - 1, 0)
-
-      const target = jumpable[next]
-      if (!target) return
-
-      // 记录当前游标 DOM 位置（用于视口微平移补偿）
-      const prevEl = document.querySelector<HTMLElement>(`[data-nodeid="${jumpable[Math.max(0, cur)]?.id}"]`)
-      const prevScreenY = prevEl ? prevEl.getBoundingClientRect().top + prevEl.clientHeight / 2 : null
-      lastCursorScreenYRef.current = prevScreenY
-
-      store.set(cursorNodeIndexAtom(focusedId), next)
-      // 同步更新 scrubberIndexAtom（user_input 维度，供导航条滑块显示）
-      const userInputs = timelineNodes.filter((n) => n.type === 'user_input')
-      if (target.type === 'user_input') {
-        const uiIdx = userInputs.findIndex((n) => n.id === target.id)
-        if (uiIdx >= 0) store.set(scrubberIndexAtom(focusedId), uiIdx)
-      }
-      store.set(nodeJumpRequestAtom, { sessionId: focusedId, nodeId: target.id, ts: Date.now() })
-      console.log(`[KeyNav] ↑↓ cursor=${next} nodeId=${target.id.slice(0,8)} type=${target.type}`)
-
-      // 视口微平移：等 scrollTop 更新后（rAF）补偿 ΔY，让游标节点视觉位置相对稳定
-      requestAnimationFrame(() => {
-        const el = document.querySelector<HTMLElement>(`[data-nodeid="${target.id}"]`)
-        if (!el || !canvasContainerRef.current) return
-        const canvasRect = canvasContainerRef.current.getBoundingClientRect()
-        const newScreenY = el.getBoundingClientRect().top + el.clientHeight / 2
-        // 目标：节点中心对齐画布容器中心 Y（视觉上节点保持在视窗中央附近）
-        const desiredScreenY = canvasRect.top + canvasRect.height / 2
-        const delta = newScreenY - desiredScreenY
-        if (Math.abs(delta) < 5) return   // 偏移极小则不调整
-        const vp = rf.getViewport()
-        rf.setViewport({ ...vp, y: vp.y - delta }, { duration: 100 })
-      })
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault()
+      commitTransition(transitionArrowMultiTap(multiTapStateRef.current, {
+        type: 'keydown',
+        key: event.key,
+        repeat: event.repeat,
+        now: performance.now(),
+      }))
+      return
     }
-  }, [store, layouts, focusSession, rf, canvasContainerRef])
+
+    interruptCandidate(false)
+  }, [commitTransition, focusSession, interruptCandidate, layouts, store])
+
+  const handleKeyUp = useCallback((event: KeyboardEvent): void => {
+    if (isEditableTarget(event.target)) {
+      interruptCandidate(false)
+      return
+    }
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+    event.preventDefault()
+    commitTransition(transitionArrowMultiTap(multiTapStateRef.current, {
+      type: 'keyup',
+      key: event.key,
+      now: performance.now(),
+    }))
+  }, [commitTransition, interruptCandidate])
 
   useEffect(() => {
+    const handleBlur = (): void => interruptCandidate(false)
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
+    window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', handleBlur)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', handleBlur)
+    }
+  }, [handleKeyDown, handleKeyUp, interruptCandidate])
+
+  useEffect(() => {
+    if (multiTapTimerRef.current) clearTimeout(multiTapTimerRef.current)
+    multiTapTimerRef.current = null
+    multiTapStateRef.current = IDLE_ARROW_MULTI_TAP_STATE
+    console.debug(`[KeyNav] multi-tap reset reason=scope-change scope=${scopeKey ?? 'none'}`)
+  }, [scopeKey])
+
+  useEffect(() => () => {
+    if (multiTapTimerRef.current) clearTimeout(multiTapTimerRef.current)
+    multiTapTimerRef.current = null
+    multiTapStateRef.current = IDLE_ARROW_MULTI_TAP_STATE
+  }, [])
 }

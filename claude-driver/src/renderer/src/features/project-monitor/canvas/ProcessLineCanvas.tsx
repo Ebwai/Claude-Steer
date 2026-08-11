@@ -230,6 +230,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
     onUserMoveEnd,
     onEscapeToFollow,
     focusSession,
+    focusSessionEdge,
     cancelNavigation,
     interactionPhase,
     targetSessionId,
@@ -262,42 +263,18 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
   })
 
   // ── 全局键盘导航（↑↓游标 + ←→框跳转） ───────────────────────────────────
-  useGlobalKeyNav(rf, layouts, focusSession, canvasContainerRef)
+  useGlobalKeyNav(rf, layouts, focusSession, focusSessionEdge, canvasContainerRef, projectId)
 
   // ── 响应外部写入的 focusRequest（来自 AgentBlock onSent 等场景）────────────
-  // 特殊定位逻辑：zoom 使框宽占满容器 90%，Y 方向使框底部对齐视口从上 3/4 处
+  // 与 ↓↓ 共用统一 explicit 相机事务：既有 90% 宽度、框底位于视口 3/4 的构图。
   useEffect(() => {
     if (!focusRequest) return
     const { sessionId } = focusRequest
     if (!sessionIds.includes(sessionId)) { setFocusRequest(null); return }
 
-    const layout = layouts.find((l) => l.sessionId === sessionId)
-    const container = canvasContainerRef.current
-    if (!layout || !container) {
-      console.log(`[Canvas] focusRequest fallback fitView: ${sessionId.slice(0,8)}`)
-      focusSession(sessionId)
-      setFocusRequest(null)
-      return
-    }
-
-    const containerW = container.clientWidth
-    const containerH = container.clientHeight
-    const frameH = allHeights.get(sessionId) ?? 400
-
-    // zoom: 框宽占容器 90%
-    const zoom = (containerW * 0.9) / FRAME_WIDTH
-    // x: 框水平居中
-    const vpX = containerW / 2 - (layout.x + FRAME_WIDTH / 2) * zoom
-    // y: 框底部落在视口 3/4 处
-    const vpY = containerH * 0.75 - (layout.y + frameH) * zoom
-
-    console.log(`[Canvas] focusRequest bottom-align: session=${sessionId.slice(0,8)} zoom=${zoom.toFixed(3)} vpX=${vpX.toFixed(0)} vpY=${vpY.toFixed(0)}`)
-    rf.setViewport({ x: vpX, y: vpY, zoom }, { duration: 350 })
-    // 锁定视口，防止 mode effect 的 fitView 覆盖此位置
-    store.set(viewportModeAtom, 'locked')
-
+    focusSessionEdge(sessionId, 'bottom', 'message-sent')
     setFocusRequest(null)
-  }, [focusRequest, sessionIds, layouts, allHeights, canvasContainerRef, rf, store, focusSession, setFocusRequest])
+  }, [focusRequest, sessionIds, focusSessionEdge, setFocusRequest])
 
   // ── orderedMainSessionIds：按 X 坐标稳定排序，只供全局主线点导航 ────────────
   // 必须放在所有早期 return 之前，确保 useMemo 每次渲染都被调用（React Hooks 规则）
