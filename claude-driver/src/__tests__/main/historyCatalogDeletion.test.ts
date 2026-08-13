@@ -10,7 +10,7 @@ import type { HistoryCatalogEntry, HistoryDeleteInput } from '../../shared/types
 import {
   buildHistoryClusters,
   scanHistoryCatalog,
-  type HistoryCatalogSnapshot,
+  type HistoryCatalogSnapshot
 } from '../../main/lib/history/HistoryCatalog'
 import { deleteHistoryTarget } from '../../main/lib/history/HistoryDeletion'
 import { loadHistoryClusterProjection } from '../../main/lib/history/HistoryDetailLoader'
@@ -23,7 +23,7 @@ const PROJECT_PATH = 'F:\\work\\project-1'
 function entry(
   sessionId: string,
   startedAt: number,
-  parentSessionId: string | null = null,
+  parentSessionId: string | null = null
 ): HistoryCatalogEntry {
   return {
     sessionId,
@@ -39,9 +39,9 @@ function entry(
       insertions: true,
       milestones: false,
       gitMarks: false,
-      sessionDirectory: true,
+      sessionDirectory: true
     },
-    subagentCount: 1,
+    subagentCount: 1
   }
 }
 
@@ -62,7 +62,7 @@ function snapshot(claudeDir: string, entries: HistoryCatalogEntry[]): HistoryCat
     entries,
     entriesById: new Map(entries.map((item) => [item.sessionId, item])),
     childrenByParentId,
-    clusters,
+    clusters
   }
 }
 
@@ -72,7 +72,7 @@ function writeBundle(claudeDir: string, sessionId: string): void {
   fs.writeFileSync(
     path.join(claudeDir, `${sessionId}.insertions.jsonl`),
     JSON.stringify({ id: `${sessionId}-trace` }) + '\n',
-    'utf8',
+    'utf8'
   )
   const subagentsDir = path.join(claudeDir, sessionId, 'subagents')
   fs.mkdirSync(subagentsDir, { recursive: true })
@@ -86,7 +86,7 @@ function deletionInput(targetSessionId: string, scope: 'cluster' | 'branch'): Hi
     targetSessionId,
     scope,
     expectedGeneration: 'generation-1',
-    operationId: `operation-${targetSessionId}`,
+    operationId: `operation-${targetSessionId}`
   }
 }
 
@@ -108,12 +108,16 @@ describe('history catalog and deletion', () => {
       entry('later-root', 500),
       entry('child', 200, 'deleted-parent'),
       entry('grandchild', 300, 'child'),
-      entry('early-root', 100),
+      entry('early-root', 100)
     ]
 
     const clusters = buildHistoryClusters(entries)
 
-    expect(clusters.map((cluster) => cluster.clusterId)).toEqual(['early-root', 'child', 'later-root'])
+    expect(clusters.map((cluster) => cluster.clusterId)).toEqual([
+      'early-root',
+      'child',
+      'later-root'
+    ])
     expect(clusters[1].isOrphaned).toBe(true)
     expect(clusters[1].sessions.map((item) => item.sessionId)).toEqual(['child', 'grandchild'])
   })
@@ -127,7 +131,11 @@ describe('history catalog and deletion', () => {
       type: 'assistant',
       uuid: 'assistant-1',
       timestamp: '2026-08-09T00:00:00.000Z',
-      message: { content: 'answer', model: 'claude-test', usage: { input_tokens: 1, output_tokens: 2 } },
+      message: {
+        content: 'answer',
+        model: 'claude-test',
+        usage: { input_tokens: 1, output_tokens: 2 }
+      }
     }
     expect(parseJsonlLine(JSON.stringify(raw))).toEqual(parseJsonlObject(raw))
     expect(parseJsonlObject(raw)?.raw).toBe(raw)
@@ -142,7 +150,7 @@ describe('history catalog and deletion', () => {
       fs.writeFileSync(
         path.join(projectHistoryDir, `session-${String(index).padStart(2, '0')}.jsonl`),
         JSON.stringify({ type: 'user', cwd: PROJECT_PATH, timestamp }) + '\n',
-        'utf8',
+        'utf8'
       )
     }
 
@@ -159,24 +167,62 @@ describe('history catalog and deletion', () => {
     const forkedFrom = { sessionId: 'root', messageUuid: 'root-user' }
     fs.writeFileSync(
       path.join(claudeDir, 'root.jsonl'),
-      `${JSON.stringify({ type: 'user', uuid: 'root-user', message: { content: 'root prompt' } })}\n`,
+      `${JSON.stringify({ type: 'user', uuid: 'root-user', message: { content: 'root prompt' } })}\n`
+    )
+    fs.writeFileSync(
+      path.join(claudeDir, 'root.resources.jsonl'),
+      `${JSON.stringify({
+        version: 1,
+        transactionId: 'resource-transaction',
+        claudeId: 'root',
+        userMessageUuid: 'root-user',
+        messageHash: 'hash',
+        resources: [
+          {
+            id: 'resource-1',
+            kind: 'pdf',
+            origin: 'original',
+            path: 'F:\\docs\\spec.pdf',
+            displayName: 'spec.pdf',
+            order: 0,
+            typeIndex: 1
+          }
+        ],
+        boundAt: 1
+      })}\n`
     )
     fs.writeFileSync(
       path.join(claudeDir, 'branch.jsonl'),
       [
         { type: 'attachment', uuid: 'attachment', forkedFrom },
-        { type: 'user', uuid: 'inherited-user', message: { content: 'inherited prompt' }, forkedFrom },
-        { type: 'assistant', uuid: 'inherited-answer', message: { content: 'inherited answer' }, forkedFrom },
+        {
+          type: 'user',
+          uuid: 'inherited-user',
+          message: { content: 'inherited prompt' },
+          forkedFrom
+        },
+        {
+          type: 'assistant',
+          uuid: 'inherited-answer',
+          message: { content: 'inherited answer' },
+          forkedFrom
+        },
         { type: 'user', uuid: 'branch-user', message: { content: 'branch prompt' } },
-        { type: 'assistant', uuid: 'branch-answer', message: { content: 'branch answer' } },
-      ].map((line) => JSON.stringify(line)).join('\n') + '\n',
+        { type: 'assistant', uuid: 'branch-answer', message: { content: 'branch answer' } }
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n') + '\n'
     )
 
     const projection = await loadHistoryClusterProjection(snapshot(claudeDir, entries), 'root')
     const branch = projection.sessions.find((item) => item.sessionId === 'branch')
 
-    expect(branch?.timeline.filter((node) => node.isBranchStart).map((node) => node.id))
-      .toEqual(['branch-user'])
+    expect(branch?.timeline.filter((node) => node.isBranchStart).map((node) => node.id)).toEqual([
+      'branch-user'
+    ])
+    expect(
+      projection.sessions.find((item) => item.sessionId === 'root')?.timeline[0].resources
+    ).toMatchObject([{ id: 'resource-1', kind: 'pdf' }])
     const forbiddenKeys: string[] = []
     const walk = (value: unknown): void => {
       if (!value || typeof value !== 'object') return
@@ -199,10 +245,14 @@ describe('history catalog and deletion', () => {
     writeBundle(claudeDir, 'unrelated')
     const unwatched: string[] = []
 
-    const result = await deleteHistoryTarget(snapshot(claudeDir, entries), deletionInput('root', 'cluster'), {
-      isSessionRunning: () => false,
-      unwatchSession: (sessionId) => unwatched.push(sessionId),
-    })
+    const result = await deleteHistoryTarget(
+      snapshot(claudeDir, entries),
+      deletionInput('root', 'cluster'),
+      {
+        isSessionRunning: () => false,
+        unwatchSession: (sessionId) => unwatched.push(sessionId)
+      }
+    )
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -220,16 +270,20 @@ describe('history catalog and deletion', () => {
       entry('branch', 200, 'root'),
       entry('sibling', 250, 'root'),
       entry('child', 300, 'branch'),
-      entry('grandchild', 400, 'child'),
+      entry('grandchild', 400, 'child')
     ]
     entries.forEach((item) => writeBundle(claudeDir, item.sessionId))
     const parentTrace = path.join(claudeDir, 'root.insertions.jsonl')
     const traceBefore = fs.readFileSync(parentTrace, 'utf8')
 
-    const result = await deleteHistoryTarget(snapshot(claudeDir, entries), deletionInput('branch', 'branch'), {
-      isSessionRunning: () => false,
-      unwatchSession: () => undefined,
-    })
+    const result = await deleteHistoryTarget(
+      snapshot(claudeDir, entries),
+      deletionInput('branch', 'branch'),
+      {
+        isSessionRunning: () => false,
+        unwatchSession: () => undefined
+      }
+    )
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -246,10 +300,14 @@ describe('history catalog and deletion', () => {
     const entries = [entry('root', 100), entry('branch', 200, 'root')]
     entries.forEach((item) => writeBundle(claudeDir, item.sessionId))
 
-    const result = await deleteHistoryTarget(snapshot(claudeDir, entries), deletionInput('root', 'cluster'), {
-      isSessionRunning: (sessionId) => sessionId === 'branch',
-      unwatchSession: () => undefined,
-    })
+    const result = await deleteHistoryTarget(
+      snapshot(claudeDir, entries),
+      deletionInput('root', 'cluster'),
+      {
+        isSessionRunning: (sessionId) => sessionId === 'branch',
+        unwatchSession: () => undefined
+      }
+    )
 
     expect(result).toMatchObject({ ok: false, errorCode: 'HISTORY_SESSION_RUNNING' })
     expect(fs.existsSync(path.join(claudeDir, 'root.jsonl'))).toBe(true)

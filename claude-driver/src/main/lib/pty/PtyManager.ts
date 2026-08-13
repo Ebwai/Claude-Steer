@@ -368,13 +368,13 @@ export class PtyManager {
    * 文本与 Enter 分为两次 PTY write，并使用已实测的 50ms TUI 按键间隔。
    * @param text 消息内容；末尾已有的 \r 会被拆出并作为独立 Enter 发送
    */
-  writeToSession(sessionId: string, text: string): void {
+  writeToSession(sessionId: string, text: string): Promise<void> {
     const previousWrite = this.lineWriteQueues.get(sessionId) ?? Promise.resolve()
     const writeTask = previousWrite.then(async () => {
       const instance = this.sessions.get(sessionId)
       if (!instance) {
         console.warn(`[PtyManager] writeToSession: session ${sessionId} not found`)
-        return
+        throw new Error(`PTY session not found: ${sessionId}`)
       }
 
       const content = text.endsWith('\r') ? text.slice(0, -1) : text
@@ -390,7 +390,7 @@ export class PtyManager {
         console.warn(
           `[PtyManager] writeToSession: Enter skipped because session changed or exited session=${sessionId}`,
         )
-        return
+        throw new Error(`PTY session changed or exited before Enter: ${sessionId}`)
       }
 
       currentInstance.pty.write('\r')
@@ -407,6 +407,7 @@ export class PtyManager {
         this.lineWriteQueues.delete(sessionId)
       }
     })
+    return writeTask
   }
 
   /**

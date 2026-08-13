@@ -47,6 +47,74 @@
   justify-content: space-between;
 }
 
+.msgbar-attach {
+  align-self: flex-start;
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--tx2);
+  padding: var(--space-xs) var(--space-md);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+
+.msgbar-attach:hover:not(:disabled) { border-color: var(--or); color: var(--or); }
+.msgbar-attach:disabled { opacity: 0.4; cursor: default; }
+
+.msgbar-resources {
+  display: flex;
+  gap: var(--space-sm);
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+.msgbar-resource {
+  position: relative;
+  flex: 0 0 112px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 24px 5px 5px;
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  background: var(--bg3);
+}
+
+.msgbar-resource-preview {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--bg2);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.msgbar-resource-preview img { width: 100%; height: 100%; object-fit: cover; }
+.msgbar-resource-type { color: var(--or); font-size: 9px; font-weight: 700; }
+.msgbar-resource-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--tx2); }
+.msgbar-resource-remove { position: absolute; top: 2px; right: 4px; border: 0; background: transparent; color: var(--tx4); cursor: pointer; }
+.msgbar-resource-remove:hover { color: #e45b5b; }
+.msgbar-error { color: #e06b6b; font-size: var(--text-xs); overflow-wrap: anywhere; }
+
+.msgbar-image-modal,
+.resource-image-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.82);
+  padding: 32px;
+}
+
+.msgbar-image-modal img,
+.resource-image-modal img { max-width: 92vw; max-height: 90vh; object-fit: contain; }
+.msgbar-image-close,
+.resource-image-close { position: fixed; top: 16px; right: 20px; border: 0; background: transparent; color: #fff; font-size: 32px; cursor: pointer; }
+
 .msgbar-hint {
   font-size: var(--text-sm);
   color: var(--tx4);

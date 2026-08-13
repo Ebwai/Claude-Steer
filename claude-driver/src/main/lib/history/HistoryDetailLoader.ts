@@ -10,9 +10,10 @@ import type {
   HistoryClusterProjection,
   HistorySessionProjection,
   HistorySubagentProjection,
-  HistoryTimelineNode,
+  HistoryTimelineNode
 } from '../../../shared/types/history'
 import type { LineInsertion } from '../../../shared/types/lineInsertion'
+import type { ResourceMessageSnapshot } from '../../../shared/types/resources'
 import { extractToolDisplay, type JsonlRecord } from '../../../shared/types/jsonl'
 import { parseJsonlObject } from '../jsonl/JsonlParser'
 import type { HistoryCatalogSnapshot } from './HistoryCatalog'
@@ -26,7 +27,7 @@ function throwIfAborted(signal?: AbortSignal): void {
 function projectRecord(
   record: JsonlRecord,
   sessionId: string,
-  fallbackId: string,
+  fallbackId: string
 ): HistoryTimelineNode | null {
   const id = record.uuid ?? fallbackId
   switch (record.type) {
@@ -38,7 +39,7 @@ function projectRecord(
         type: 'user_input',
         text: record.text,
         isBranchStart: record.isBranchStart,
-        parsedAt: record.parsedAt,
+        parsedAt: record.parsedAt
       }
     case 'assistant':
       if (!record.text?.trim()) return null
@@ -53,7 +54,7 @@ function projectRecord(
         toolName: display.toolName,
         toolDisplayText: display.displayText,
         toolUseId: record.toolUse.id,
-        parsedAt: record.parsedAt,
+        parsedAt: record.parsedAt
       }
     }
     case 'tool_result':
@@ -65,7 +66,7 @@ function projectRecord(
         toolUseId: record.toolResult.tool_use_id,
         isError: record.toolResult.is_error ?? false,
         text: typeof record.toolResult.content === 'string' ? record.toolResult.content : undefined,
-        parsedAt: record.parsedAt,
+        parsedAt: record.parsedAt
       }
     default:
       return null
@@ -82,7 +83,7 @@ async function readHistoryTimeline(
   filePath: string,
   sessionId: string,
   signal?: AbortSignal,
-  agentId?: string,
+  agentId?: string
 ): Promise<TimelineProjectionResult> {
   const timeline: HistoryTimelineNode[] = []
   const visibleIndexByUuid = new Map<string, number>()
@@ -114,9 +115,10 @@ async function readHistoryTimeline(
 
       const isSnapshot = raw.type === 'file-history-snapshot'
       const forkedFrom = raw.forkedFrom
-      const hasForkedFrom = typeof forkedFrom === 'object'
-        && forkedFrom !== null
-        && typeof (forkedFrom as Record<string, unknown>).sessionId === 'string'
+      const hasForkedFrom =
+        typeof forkedFrom === 'object' &&
+        forkedFrom !== null &&
+        typeof (forkedFrom as Record<string, unknown>).sessionId === 'string'
       sawHistorySnapshot ||= isSnapshot
       sawForkedFrom ||= hasForkedFrom
 
@@ -135,16 +137,16 @@ async function readHistoryTimeline(
         const node = projectRecord(
           record,
           sessionId,
-          `history-${sessionId}-${agentId ?? 'main'}-${lineNumber}`,
+          `history-${sessionId}-${agentId ?? 'main'}-${lineNumber}`
         )
         if (record.uuid) visibleIndexByUuid.set(record.uuid, Math.max(0, visibleNodeCount - 1))
         if (node) {
           if (
-            !agentId
-            && fallbackCandidateIndex === null
-            && sawForkedFrom
-            && !hasForkedFrom
-            && record.type === 'user'
+            !agentId &&
+            fallbackCandidateIndex === null &&
+            sawForkedFrom &&
+            !hasForkedFrom &&
+            record.type === 'user'
           ) {
             fallbackCandidateIndex = timeline.length
           }
@@ -160,7 +162,7 @@ async function readHistoryTimeline(
       if (firstBranchUser) {
         firstBranchUser.isBranchStart = true
         console.info(
-          `[HistoryProjection] Branch start fallback session=${sessionId.slice(0, 8)} strategy=forkedFrom-boundary-user node=${firstBranchUser.id.slice(0, 12)}`,
+          `[HistoryProjection] Branch start fallback session=${sessionId.slice(0, 8)} strategy=forkedFrom-boundary-user node=${firstBranchUser.id.slice(0, 12)}`
         )
       }
     }
@@ -173,7 +175,7 @@ async function readHistoryTimeline(
 
 async function readJsonLines<T>(
   filePath: string,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{ values: T[]; errors: string[] }> {
   const values: T[] = []
   const errors: string[] = []
@@ -208,7 +210,7 @@ async function readJsonLines<T>(
 
 async function replayInsertions(
   filePath: string,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{ values: LineInsertion[]; errors: string[] }> {
   const parsed = await readJsonLines<Record<string, unknown>>(filePath, signal)
   const byId = new Map<string, LineInsertion>()
@@ -230,14 +232,14 @@ async function replayInsertions(
   }
   return {
     values: order.map((id) => byId.get(id)).filter((item): item is LineInsertion => !!item),
-    errors: parsed.errors,
+    errors: parsed.errors
   }
 }
 
 async function loadSubagentProjections(
   claudeDir: string,
   sessionId: string,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<HistorySubagentProjection[]> {
   const subagentsDir = path.join(claudeDir, sessionId, 'subagents')
   let names: string[]
@@ -246,20 +248,29 @@ async function loadSubagentProjections(
   } catch {
     return []
   }
-  const transcriptNames = names.filter((name) =>
-    name.startsWith('agent-') && name.endsWith('.jsonl') && !name.endsWith('.insertions.jsonl')
+  const transcriptNames = names.filter(
+    (name) =>
+      name.startsWith('agent-') && name.endsWith('.jsonl') && !name.endsWith('.insertions.jsonl')
   )
   const results: HistorySubagentProjection[] = []
   for (const name of transcriptNames) {
     throwIfAborted(signal)
     const agentId = name.slice('agent-'.length, -'.jsonl'.length)
-    const transcript = await readHistoryTimeline(path.join(subagentsDir, name), sessionId, signal, agentId)
-    const insertions = await replayInsertions(path.join(subagentsDir, `agent-${agentId}.insertions.jsonl`), signal)
+    const transcript = await readHistoryTimeline(
+      path.join(subagentsDir, name),
+      sessionId,
+      signal,
+      agentId
+    )
+    const insertions = await replayInsertions(
+      path.join(subagentsDir, `agent-${agentId}.insertions.jsonl`),
+      signal
+    )
     results.push({
       agentId,
       timeline: transcript.timeline,
       insertions: insertions.values,
-      partialErrors: [...transcript.errors, ...insertions.errors],
+      partialErrors: [...transcript.errors, ...insertions.errors]
     })
   }
   return results
@@ -268,11 +279,13 @@ async function loadSubagentProjections(
 export async function loadHistoryClusterProjection(
   snapshot: HistoryCatalogSnapshot,
   clusterId: string,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<HistoryClusterProjection> {
   const cluster = snapshot.clusters.find((item) => item.clusterId === clusterId)
   if (!cluster) {
-    throw Object.assign(new Error(`History cluster not found: ${clusterId}`), { code: 'HISTORY_NOT_FOUND' })
+    throw Object.assign(new Error(`History cluster not found: ${clusterId}`), {
+      code: 'HISTORY_NOT_FOUND'
+    })
   }
 
   const projections: HistorySessionProjection[] = []
@@ -280,13 +293,33 @@ export async function loadHistoryClusterProjection(
   for (const entry of cluster.sessions) {
     throwIfAborted(signal)
     const transcriptPath = path.join(snapshot.claudeDir, `${entry.sessionId}.jsonl`)
-    const [transcript, insertions, milestones, gitMarks, subagents] = await Promise.all([
+    const [transcript, insertions, milestones, gitMarks, resources, subagents] = await Promise.all([
       readHistoryTimeline(transcriptPath, entry.sessionId, signal),
-      replayInsertions(path.join(snapshot.claudeDir, `${entry.sessionId}.insertions.jsonl`), signal),
-      readJsonLines<Milestone>(path.join(snapshot.claudeDir, `${entry.sessionId}.milestones.jsonl`), signal),
-      readJsonLines<GitMark>(path.join(snapshot.claudeDir, `${entry.sessionId}.git-marks.jsonl`), signal),
-      loadSubagentProjections(snapshot.claudeDir, entry.sessionId, signal),
+      replayInsertions(
+        path.join(snapshot.claudeDir, `${entry.sessionId}.insertions.jsonl`),
+        signal
+      ),
+      readJsonLines<Milestone>(
+        path.join(snapshot.claudeDir, `${entry.sessionId}.milestones.jsonl`),
+        signal
+      ),
+      readJsonLines<GitMark>(
+        path.join(snapshot.claudeDir, `${entry.sessionId}.git-marks.jsonl`),
+        signal
+      ),
+      readJsonLines<ResourceMessageSnapshot>(
+        path.join(snapshot.claudeDir, `${entry.sessionId}.resources.jsonl`),
+        signal
+      ),
+      loadSubagentProjections(snapshot.claudeDir, entry.sessionId, signal)
     ])
+    const resourcesByUuid = new Map(
+      resources.values.map((item) => [item.userMessageUuid, item.resources])
+    )
+    for (const node of transcript.timeline) {
+      const attached = resourcesByUuid.get(node.id)
+      if (attached?.length) node.resources = attached
+    }
     visibleIndexesBySession.set(entry.sessionId, transcript.visibleIndexByUuid)
     projections.push({
       sessionId: entry.sessionId,
@@ -296,7 +329,13 @@ export async function loadHistoryClusterProjection(
       gitMarks: gitMarks.values,
       subagents,
       triggerNodeIndex: null,
-      partialErrors: [...transcript.errors, ...insertions.errors, ...milestones.errors, ...gitMarks.errors],
+      partialErrors: [
+        ...transcript.errors,
+        ...insertions.errors,
+        ...milestones.errors,
+        ...gitMarks.errors,
+        ...resources.errors
+      ]
     })
   }
 
@@ -305,28 +344,46 @@ export async function loadHistoryClusterProjection(
     if (!entry.parentSessionId || !entry.forkMessageUuid) continue
     const child = projectionsById.get(entry.sessionId)
     if (child) {
-      child.triggerNodeIndex = visibleIndexesBySession
-        .get(entry.parentSessionId)
-        ?.get(entry.forkMessageUuid) ?? null
+      child.triggerNodeIndex =
+        visibleIndexesBySession.get(entry.parentSessionId)?.get(entry.forkMessageUuid) ?? null
     }
   }
 
   const nodeCount = projections.reduce(
-    (total, item) => total + item.timeline.length + item.subagents.reduce((n, subagent) => n + subagent.timeline.length, 0),
-    0,
+    (total, item) =>
+      total +
+      item.timeline.length +
+      item.subagents.reduce((n, subagent) => n + subagent.timeline.length, 0),
+    0
   )
   const partialCount = projections.reduce((total, item) => total + item.partialErrors.length, 0)
-  const projection: HistoryClusterProjection = { clusterId, sessions: projections, projectedAt: Date.now() }
+  const projection: HistoryClusterProjection = {
+    clusterId,
+    sessions: projections,
+    projectedAt: Date.now()
+  }
   const estimatedBytes = projections.reduce((total, session) => {
     const timelines = [session.timeline, ...session.subagents.map((subagent) => subagent.timeline)]
-    const timelineBytes = timelines.flat().reduce(
-      (bytes, node) => bytes + 96 + Buffer.byteLength(node.text ?? '') + Buffer.byteLength(node.toolDisplayText ?? ''),
-      0,
+    const timelineBytes = timelines
+      .flat()
+      .reduce(
+        (bytes, node) =>
+          bytes +
+          96 +
+          Buffer.byteLength(node.text ?? '') +
+          Buffer.byteLength(node.toolDisplayText ?? ''),
+        0
+      )
+    return (
+      total +
+      timelineBytes +
+      session.insertions.length * 128 +
+      session.milestones.length * 96 +
+      session.gitMarks.length * 96
     )
-    return total + timelineBytes + session.insertions.length * 128 + session.milestones.length * 96 + session.gitMarks.length * 96
   }, 0)
   console.info(
-    `[HistoryProjection] cluster=${clusterId.slice(0, 8)} sessions=${projections.length} nodes=${nodeCount} partialErrors=${partialCount} estimatedBytes=${estimatedBytes}`,
+    `[HistoryProjection] cluster=${clusterId.slice(0, 8)} sessions=${projections.length} nodes=${nodeCount} partialErrors=${partialCount} estimatedBytes=${estimatedBytes}`
   )
   return projection
 }

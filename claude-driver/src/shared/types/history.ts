@@ -5,6 +5,7 @@
 import type { JsonlUsage } from './jsonl'
 import type { LineInsertion } from './lineInsertion'
 import type { GitMark, Milestone } from './index'
+import type { ResourceSnapshot } from './resources'
 
 export type HistoryDetailsState = 'shell' | 'hydrating' | 'resident' | 'error'
 
@@ -100,7 +101,12 @@ export type HistoryCatalogBatch =
     }
   | HistoryFailure
 
-export type HistoryTimelineNodeType = 'user_input' | 'assistant' | 'tool_use' | 'tool_result' | 'system'
+export type HistoryTimelineNodeType =
+  | 'user_input'
+  | 'assistant'
+  | 'tool_use'
+  | 'tool_result'
+  | 'system'
 
 /** 历史正文唯一跨进程节点；刻意排除 JsonlRecord.raw、usage、model、cwd 和工具输入。 */
 export interface HistoryTimelineNode {
@@ -108,6 +114,7 @@ export interface HistoryTimelineNode {
   sessionId: string
   type: HistoryTimelineNodeType
   text?: string
+  resources?: ResourceSnapshot[]
   toolName?: string
   toolDisplayText?: string
   toolUseId?: string

@@ -7,9 +7,14 @@ import { createTestStore } from '../helpers/createTestStore'
 import type { TestStore } from '../helpers/createTestStore'
 import { createJsonlHandler } from '@renderer/business/jsonlHandler'
 import { bindPty } from '@renderer/capabilities/ptyBindings'
-import { timelineBySessionAtom, lineInsertionsBySessionAtom, subagentTimelineAtom } from '@renderer/atoms/timeline.atom'
+import {
+  timelineBySessionAtom,
+  lineInsertionsBySessionAtom,
+  subagentTimelineAtom
+} from '@renderer/atoms/timeline.atom'
 import { subagentIdsAtom } from '@renderer/atoms/agent-block.atom'
 import type { JsonlRecord } from '@shared/types/jsonl'
+import type { ResourceSnapshot } from '@shared/types/resources'
 
 function makeRecord(override: Partial<JsonlRecord> = {}): JsonlRecord {
   return {
@@ -18,7 +23,7 @@ function makeRecord(override: Partial<JsonlRecord> = {}): JsonlRecord {
     parsedAt: 1000,
     uuid: 'uuid-1',
     sessionId: 'c1',
-    ...override,
+    ...override
   }
 }
 
@@ -40,7 +45,10 @@ describe('BL-6: handleRecord', () => {
   })
 
   it('无绑定时 rawId 原样作为 key', () => {
-    handler.handleRecord('unknown-pty', makeRecord({ sessionId: 'unknown-pty', type: 'assistant', text: '回复' }))
+    handler.handleRecord(
+      'unknown-pty',
+      makeRecord({ sessionId: 'unknown-pty', type: 'assistant', text: '回复' })
+    )
     expect(store.get(timelineBySessionAtom('unknown-pty'))).toHaveLength(1)
   })
 
@@ -66,7 +74,7 @@ describe('BL-6: handleBatchRecords', () => {
     bindPty(store, 'p1', 'c1')
     const records = [
       makeRecord({ uuid: 'n1', type: 'user', text: '用户输入1' }),
-      makeRecord({ uuid: 'n2', type: 'assistant', text: '回复1' }),
+      makeRecord({ uuid: 'n2', type: 'assistant', text: '回复1' })
     ]
     handler.handleBatchRecords('p1', records)
     expect(store.get(timelineBySessionAtom('c1'))).toHaveLength(2)
@@ -86,7 +94,11 @@ describe('BL-6: handleBatchRecords', () => {
 describe('BL-6: handleSubagentRecord', () => {
   it('写入 subagentTimeline key', () => {
     bindPty(store, 'p1', 'c1')
-    handler.handleSubagentRecord('p1', 'agent-1', makeRecord({ type: 'assistant', text: '子 agent 回复' }))
+    handler.handleSubagentRecord(
+      'p1',
+      'agent-1',
+      makeRecord({ type: 'assistant', text: '子 agent 回复' })
+    )
     const key = 'c1::agent-1'
     expect(store.get(subagentTimelineAtom(key))).toHaveLength(1)
   })
@@ -95,5 +107,29 @@ describe('BL-6: handleSubagentRecord', () => {
     bindPty(store, 'p1', 'c1')
     handler.handleSubagentRecord('p1', 'agent-1', makeRecord())
     expect(store.get(subagentIdsAtom('c1'))).toContain('agent-1')
+  })
+})
+
+describe('BL-6: handleResourceBound', () => {
+  it('只把已绑定资源挂到真实用户消息节点', () => {
+    bindPty(store, 'p1', 'c1')
+    handler.handleRecord('p1', makeRecord({ uuid: 'user-1', type: 'user', text: '带资源消息' }))
+    const resource: ResourceSnapshot = {
+      id: 'resource-1',
+      kind: 'pdf',
+      origin: 'original',
+      path: 'F:\\docs\\spec.pdf',
+      displayName: 'spec.pdf',
+      order: 0,
+      typeIndex: 1
+    }
+
+    handler.handleResourceBound({
+      sessionId: 'c1',
+      userMessageUuid: 'user-1',
+      resources: [resource]
+    })
+
+    expect(store.get(timelineBySessionAtom('c1'))[0].resources).toEqual([resource])
   })
 })

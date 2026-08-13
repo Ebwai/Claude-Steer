@@ -18,9 +18,10 @@ function renderInput(): ReturnType<typeof render> {
   return render(
     <MessageInputBar
       sessionId="session-1"
+      projectPath={'F:\\work\\project'}
       isRunning
       agentLabel="Agent1"
-    />,
+    />
   )
 }
 
@@ -30,7 +31,7 @@ describe('MessageInputBar', () => {
     invoke.mockResolvedValue({ ok: true })
     Object.defineProperty(window, 'api', {
       configurable: true,
-      value: { invoke },
+      value: { invoke }
     })
   })
 
@@ -38,14 +39,14 @@ describe('MessageInputBar', () => {
     const { container } = renderInput()
     const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, {
-      target: { value: '  第一行\n第二行  ' },
+      target: { value: '  第一行\n第二行  ' }
     })
     fireEvent.click(container.querySelector('.msgbar-btn-send') as HTMLButtonElement)
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith(IPC.SESSION_INPUT, {
         sessionId: 'session-1',
-        text: '第一行\n第二行',
+        text: '第一行\n第二行'
       })
     })
   })
@@ -54,18 +55,53 @@ describe('MessageInputBar', () => {
     renderInput()
     const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, {
-      target: { value: '目标内容\n' },
+      target: { value: '目标内容\n' }
     })
     fireEvent.keyDown(textarea, {
       key: 'Enter',
-      ctrlKey: true,
+      ctrlKey: true
     })
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith(IPC.SESSION_INPUT, {
         sessionId: 'session-1',
-        text: '目标内容',
+        text: '目标内容'
       })
     })
+  })
+
+  it('imports selected resources and sends them through the atomic resource channel', async () => {
+    const resource = {
+      id: 'resource-1',
+      kind: 'pdf',
+      origin: 'original',
+      path: 'F:\\docs\\spec.pdf',
+      displayName: 'spec.pdf',
+      order: 0,
+      typeIndex: 0
+    }
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === IPC.RESOURCE_PICK) return { ok: true, resources: [resource], failures: [] }
+      return {
+        ok: true,
+        transactionId: 'tx-1',
+        finalText: 'PDF1：F:\\docs\\spec.pdf',
+        resources: [resource]
+      }
+    })
+    const { container } = renderInput()
+
+    fireEvent.click(screen.getByRole('button', { name: /添加图片与文件/i }))
+    await screen.findByText('spec.pdf')
+    fireEvent.click(container.querySelector('.msgbar-btn-send') as HTMLButtonElement)
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(IPC.RESOURCE_SEND, {
+        sessionId: 'session-1',
+        projectPath: 'F:\\work\\project',
+        text: '',
+        resources: [resource]
+      })
+    )
   })
 })

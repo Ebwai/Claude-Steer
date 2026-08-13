@@ -249,6 +249,15 @@ const zhCN: Record<string, string> = {
   'projectMonitor.inputBar.interrupt': '打断',
   'projectMonitor.inputBar.sending': '发送中…',
   'projectMonitor.inputBar.send': '发送 ▶',
+  'projectMonitor.inputBar.addResources': '添加图片与文件',
+  'projectMonitor.inputBar.importing': '正在添加…',
+  'projectMonitor.inputBar.attachedResources': '已添加资源',
+  'projectMonitor.inputBar.remove': '移除',
+  'projectMonitor.inputBar.closePreview': '关闭图片预览',
+  'projectMonitor.inputBar.clipboardNoPath': '该文件没有可用的原始路径；请使用“添加图片与文件”选择它。',
+  'projectMonitor.resources.related': '关联资源',
+  'projectMonitor.resources.openFailed': '无法打开文件',
+  'projectMonitor.resources.closePreview': '关闭图片预览',
 
   // ── 项目监控 - 工具面板 (ToolsPanel) ──
   'projectMonitor.toolsPanel.title': '工具',

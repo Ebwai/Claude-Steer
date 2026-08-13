@@ -22,6 +22,7 @@ import { buildJumpableNodes } from '../../capabilities/jumpableNodes'
 import LineInsertionItem from './LineInsertionItem'
 import SubagentBlock from './SubagentBlock'
 import AssignAgentPanel from './AssignAgentPanel'
+import ResourceAttachments from './ResourceAttachments'
 import { useT } from '../../i18n'
 import './ProcessTimeline.css'
 
@@ -377,6 +378,7 @@ function TimelineNodeItem({ node, toolResults, onUserInputRef, isLastNode, sessi
             <span className="ptl-delete-placeholder" title={t('projectMonitor.timeline.deleteComingSoon')}>🗑</span>
           </div>
           <span className="ptl-user-text">{displayText}</span>
+          {!!node.resources?.length && projectPath && <ResourceAttachments resources={node.resources} projectPath={projectPath} />}
           {isUserLong && (
             <button className="ptl-expand-btn" onClick={() => setExpanded((v) => !v)}>
               {expanded ? t('projectMonitor.timeline.collapse') : t('projectMonitor.timeline.expandFull', { lines: lines.length })}

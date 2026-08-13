@@ -2,7 +2,7 @@
 // 编译说明：preload 脚本在受限 Node.js 上下文中运行，通过 contextBridge 暴露给 renderer
 // 代码说明：ContextBridge IPC 封装——将 ipcMain handler 映射为类型安全的 window.api 方法
 
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { IpcChannel } from '../shared/events/ipc-channels'
 
@@ -40,12 +40,23 @@ const api = {
   }
 }
 
+const resourceApi = {
+  getPathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  }
+}
+
 // 通过 contextBridge 安全暴露给渲染进程
 // process.contextIsolated 默认为 true（sandbox: false 不影响 context isolation）
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
+    contextBridge.exposeInMainWorld('resourceApi', resourceApi)
   } catch (error) {
     console.error('[preload] contextBridge expose failed:', error)
   }
@@ -54,4 +65,6 @@ if (process.contextIsolated) {
   window.electron = electronAPI
   // @ts-ignore (define in dts)
   window.api = api
+  // @ts-ignore (define in dts)
+  window.resourceApi = resourceApi
 }

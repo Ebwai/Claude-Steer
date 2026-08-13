@@ -9,6 +9,7 @@ import {
   appendTimelineNodes,
   appendInsertion,
   resolveTimelineKey,
+  attachResourcesToTimelineNode
 } from '@renderer/capabilities/timelineStore'
 import { setInsight, registerSubagentId } from '@renderer/capabilities/agentActivity'
 import { jsonlRecordToNode } from '@renderer/capabilities/utils/jsonlToNode'
@@ -16,9 +17,14 @@ import { extractInsightText } from '@renderer/capabilities/utils/insightExtracto
 import { addTokensFromRecord } from '@renderer/capabilities/tokenCapability'
 import type { PtyBindings } from '@renderer/atoms/pty-binding.atom'
 import { ptyBindingsAtom } from '@renderer/atoms/pty-binding.atom'
-import { subagentTimelineAtom, lineInsertionsBySessionAtom, type TimelineNode } from '@renderer/atoms/timeline.atom'
+import {
+  subagentTimelineAtom,
+  lineInsertionsBySessionAtom,
+  type TimelineNode
+} from '@renderer/atoms/timeline.atom'
 import type { LineInsertion } from '@shared/types/lineInsertion'
 import type { TestStore } from '../../../__tests__/helpers/createTestStore'
+import type { ResourceBoundPayload } from '@shared/types/resources'
 
 type Store = Pick<TestStore, 'get' | 'set'>
 
@@ -26,7 +32,12 @@ function getBindings(store: Store): PtyBindings {
   return store.get(ptyBindingsAtom)
 }
 
-function buildInsightInsertion(sessionId: string, text: string, parsedAt: number, recordUuid?: string): LineInsertion {
+function buildInsightInsertion(
+  sessionId: string,
+  text: string,
+  parsedAt: number,
+  recordUuid?: string
+): LineInsertion {
   return {
     id: recordUuid ? `${sessionId}-insight-${recordUuid}` : `${sessionId}-insight-${parsedAt}`,
     type: 'insight',
@@ -37,10 +48,9 @@ function buildInsightInsertion(sessionId: string, text: string, parsedAt: number
     timestamp: parsedAt,
     badgeContent: { toolName: '◆ Insight', displayText: text },
     status: 'done',
-    isAnimating: false,
+    isAnimating: false
   }
 }
-
 
 export function createJsonlHandler(store: Store) {
   function handleRecord(rawId: string, record: JsonlRecord): void {
@@ -56,7 +66,11 @@ export function createJsonlHandler(store: Store) {
     if (record.type === 'assistant' && record.text) {
       const insightText = extractInsightText(record.text)
       if (insightText) {
-        appendInsertion(store, claudeId, buildInsightInsertion(claudeId, insightText, record.parsedAt, record.uuid))
+        appendInsertion(
+          store,
+          claudeId,
+          buildInsightInsertion(claudeId, insightText, record.parsedAt, record.uuid)
+        )
         // 同步更新 AgentBlock 金色卡片（record.sessionId 是 Claude Code 内部 session UUID）
         if (record.sessionId) {
           setInsight(store, record.sessionId, insightText)
@@ -102,7 +116,11 @@ export function createJsonlHandler(store: Store) {
   }
 
   /** 处理 subagent 插入线批量推送（历史加载时由 JSONL_WATCH 主进程发送） */
-  function handleSubagentInsertions(rawId: string, agentId: string, insertions: LineInsertion[]): void {
+  function handleSubagentInsertions(
+    rawId: string,
+    agentId: string,
+    insertions: LineInsertion[]
+  ): void {
     const claudeId = resolveTimelineKey(rawId, getBindings(store))
     for (const ins of insertions) {
       store.set(lineInsertionsBySessionAtom(agentId), (prev) => {
@@ -111,7 +129,14 @@ export function createJsonlHandler(store: Store) {
       })
     }
     registerSubagentId(store, claudeId, agentId)
-    console.log(`[jsonlHandler] subagent insertions: agentId=${agentId.slice(0, 8)} count=${insertions.length}`)
+    console.log(
+      `[jsonlHandler] subagent insertions: agentId=${agentId.slice(0, 8)} count=${insertions.length}`
+    )
+  }
+
+  function handleResourceBound(payload: ResourceBoundPayload): void {
+    const claudeId = resolveTimelineKey(payload.sessionId, getBindings(store))
+    attachResourcesToTimelineNode(store, claudeId, payload.userMessageUuid, payload.resources)
   }
 
   function register(): Array<() => void> {
@@ -125,15 +150,26 @@ export function createJsonlHandler(store: Store) {
         handleBatchRecords(sessionId, records)
       }),
       window.api.on(IPC.JSONL_SUBAGENT_RECORD, (data: unknown) => {
-        const { sessionId, agentId, record } = data as { sessionId: string; agentId: string; record: JsonlRecord }
+        const { sessionId, agentId, record } = data as {
+          sessionId: string
+          agentId: string
+          record: JsonlRecord
+        }
         handleSubagentRecord(sessionId, agentId, record)
       }),
       window.api.on(IPC.JSONL_SUBAGENT_INSERTIONS, (data: unknown) => {
-        const { sessionId, agentId, insertions } = data as { sessionId: string; agentId: string; insertions: LineInsertion[] }
+        const { sessionId, agentId, insertions } = data as {
+          sessionId: string
+          agentId: string
+          insertions: LineInsertion[]
+        }
         handleSubagentInsertions(sessionId, agentId, insertions)
       }),
+      window.api.on(IPC.RESOURCE_BOUND, (data: unknown) => {
+        handleResourceBound(data as ResourceBoundPayload)
+      })
     ]
   }
 
-  return { register, handleRecord, handleBatchRecords, handleSubagentRecord }
+  return { register, handleRecord, handleBatchRecords, handleSubagentRecord, handleResourceBound }
 }

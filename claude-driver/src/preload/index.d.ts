@@ -11,5 +11,6 @@ declare global {
       on: (channel: IpcChannel, listener: (...args: unknown[]) => void) => () => void
       removeAllListeners: (channel: IpcChannel) => void
     }
+    resourceApi: { getPathForFile: (file: File) => string }
   }
 }

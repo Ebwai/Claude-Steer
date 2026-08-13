@@ -23,7 +23,6 @@ export type PermissionMode =
   | 'dontAsk'
   | 'bypassPermissions'
 
-
 export interface FeishuBotConfig {
   appId: string
   appSecret: string
@@ -336,7 +335,6 @@ export interface GitMark {
 // 11. PlanIndicator（倒三角执行指示器）
 // ════════════════════════════════════════════════════════════
 
-
 /**
  * 倒三角执行指示器：
  *  active         = plan 文件最近有变动，正在执行
@@ -402,7 +400,13 @@ export interface DriverConfig {
 // 13. Provider 配置类型（多供应商支持，参考 cc-switch）
 // ════════════════════════════════════════════════════════════
 
-export type ProviderId = 'anthropic' | 'deepseek' | 'openrouter' | 'siliconflow' | 'minimax' | 'custom'
+export type ProviderId =
+  | 'anthropic'
+  | 'deepseek'
+  | 'openrouter'
+  | 'siliconflow'
+  | 'minimax'
+  | 'custom'
 
 export interface ProviderPreset {
   id: ProviderId
@@ -431,3 +435,4 @@ export interface ProviderEnvBlock {
 
 // 历史工作区跨进程契约（放在末尾避免打断既有领域类型编号）
 export * from './history'
+export * from './resources'

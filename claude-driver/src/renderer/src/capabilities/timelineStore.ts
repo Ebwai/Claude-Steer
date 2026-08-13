@@ -5,7 +5,7 @@
 import {
   timelineBySessionAtom,
   lineInsertionsBySessionAtom,
-  timelineInsertionSignalAtom,
+  timelineInsertionSignalAtom
 } from '@renderer/atoms/timeline.atom'
 import type { TimelineNode } from '@renderer/atoms/timeline.atom'
 import type { LineInsertion, LineInsertionStatus } from '@shared/types/lineInsertion'
@@ -13,6 +13,7 @@ import type { PtyBindings } from '@renderer/atoms/pty-binding.atom'
 import type { TestStore } from '../../../__tests__/helpers/createTestStore'
 import { activeSessionsAtom } from '@renderer/atoms/session-core.atom'
 import { IPC } from '@shared/events/ipc-channels'
+import type { ResourceSnapshot } from '@shared/types/resources'
 
 type Store = Pick<TestStore, 'get' | 'set'>
 
@@ -27,7 +28,7 @@ export function appendTimelineNode(store: Store, claudeId: string, node: Timelin
   if (appended) {
     store.set(timelineInsertionSignalAtom, (prev) => ({
       sessionId: claudeId,
-      sequence: (prev?.sequence ?? 0) + 1,
+      sequence: (prev?.sequence ?? 0) + 1
     }))
   }
 }
@@ -39,9 +40,23 @@ export function appendTimelineNodes(store: Store, claudeId: string, nodes: Timel
     const existingIds = new Set(prev.map((n) => n.id))
     const newNodes = nodes.filter((n) => !existingIds.has(n.id))
     if (newNodes.length === 0) return prev
-    console.log(`[timelineStore] appendTimelineNodes: +${newNodes.length} new (${nodes.length - newNodes.length} dupes skipped)`)
+    console.log(
+      `[timelineStore] appendTimelineNodes: +${newNodes.length} new (${nodes.length - newNodes.length} dupes skipped)`
+    )
     return [...prev, ...newNodes]
   })
+}
+
+/** 将已持久化的关联资源挂到真实 user message UUID 对应节点。 */
+export function attachResourcesToTimelineNode(
+  store: Store,
+  claudeId: string,
+  nodeId: string,
+  resources: ResourceSnapshot[]
+): void {
+  store.set(timelineBySessionAtom(claudeId), (prev) =>
+    prev.map((node) => (node.id === nodeId ? { ...node, resources } : node))
+  )
 }
 
 /** 从 activeSessionsAtom 获取 transcriptPath（持久化用） */
@@ -66,12 +81,13 @@ export function appendInsertion(store: Store, claudeId: string, insertion: LineI
 
   store.set(timelineInsertionSignalAtom, (prev) => ({
     sessionId: claudeId,
-    sequence: (prev?.sequence ?? 0) + 1,
+    sequence: (prev?.sequence ?? 0) + 1
   }))
 
   const transcriptPath = getTranscriptPath(store, claudeId)
   if (transcriptPath) {
-    void window.api.invoke(IPC.INSERTION_APPEND, { transcriptPath, insertion })
+    void window.api
+      .invoke(IPC.INSERTION_APPEND, { transcriptPath, insertion })
       .catch((err: unknown) => console.warn('[timelineStore] insertion:append failed:', err))
   }
 }
@@ -119,10 +135,12 @@ export function updateInsertionStatus(
   if (patchedId) {
     const transcriptPath = getTranscriptPath(store, claudeId)
     if (transcriptPath) {
-      void window.api.invoke(IPC.INSERTION_PATCH, {
-        transcriptPath,
-        patch: { _patch: true, id: patchedId, status, isAnimating: status === 'running' },
-      }).catch((err: unknown) => console.warn('[timelineStore] insertion:patch failed:', err))
+      void window.api
+        .invoke(IPC.INSERTION_PATCH, {
+          transcriptPath,
+          patch: { _patch: true, id: patchedId, status, isAnimating: status === 'running' }
+        })
+        .catch((err: unknown) => console.warn('[timelineStore] insertion:patch failed:', err))
     }
   }
 }
@@ -151,10 +169,14 @@ export function patchInsertion(
 
   const transcriptPath = getTranscriptPath(store, claudeId)
   if (transcriptPath) {
-    void window.api.invoke(IPC.INSERTION_PATCH, {
-      transcriptPath,
-      patch: { _patch: true, id, ...changes },
-    }).catch((err: unknown) => console.warn('[timelineStore] insertion:patch (patchInsertion) failed:', err))
+    void window.api
+      .invoke(IPC.INSERTION_PATCH, {
+        transcriptPath,
+        patch: { _patch: true, id, ...changes }
+      })
+      .catch((err: unknown) =>
+        console.warn('[timelineStore] insertion:patch (patchInsertion) failed:', err)
+      )
   }
 }
 
@@ -176,9 +198,9 @@ export function getTimelineLength(store: Store, claudeId: string): number {
  * 用于 branchHandler 计算 triggerNodeIndex，与历史路径 branchTriggerIndex 语义对齐
  */
 export function getVisibleNodeCount(store: Store, claudeId: string): number {
-  return store.get(timelineBySessionAtom(claudeId))
-    .filter((n) => n.type === 'user_input' || n.type === 'assistant')
-    .length
+  return store
+    .get(timelineBySessionAtom(claudeId))
+    .filter((n) => n.type === 'user_input' || n.type === 'assistant').length
 }
 
 /** K6b: 查询最后一个时间线节点的 parsedAt（branch 插入线 timestamp 用，保证落入正确时间窗口） */
@@ -201,7 +223,7 @@ export function appendSubagentInsertion(
   store: Store,
   parentClaudeId: string,
   agentId: string,
-  insertion: LineInsertion,
+  insertion: LineInsertion
 ): void {
   let isDuplicate = false
   store.set(lineInsertionsBySessionAtom(agentId), (prev) => {
@@ -216,8 +238,11 @@ export function appendSubagentInsertion(
 
   const parentTranscriptPath = getTranscriptPath(store, parentClaudeId)
   if (parentTranscriptPath) {
-    void window.api.invoke(IPC.INSERTION_SUBAGENT_APPEND, { parentTranscriptPath, agentId, insertion })
-      .catch((err: unknown) => console.warn('[timelineStore] subagent insertion:append failed:', err))
+    void window.api
+      .invoke(IPC.INSERTION_SUBAGENT_APPEND, { parentTranscriptPath, agentId, insertion })
+      .catch((err: unknown) =>
+        console.warn('[timelineStore] subagent insertion:append failed:', err)
+      )
   }
 }
 
@@ -230,7 +255,7 @@ export function updateSubagentInsertionStatus(
   parentClaudeId: string,
   agentId: string,
   matcher: string | { toolUseId: string },
-  status: LineInsertionStatus,
+  status: LineInsertionStatus
 ): void {
   let patchedId: string | null = null
 
@@ -262,11 +287,15 @@ export function updateSubagentInsertionStatus(
   if (patchedId) {
     const parentTranscriptPath = getTranscriptPath(store, parentClaudeId)
     if (parentTranscriptPath) {
-      void window.api.invoke(IPC.INSERTION_SUBAGENT_PATCH, {
-        parentTranscriptPath,
-        agentId,
-        patch: { _patch: true, id: patchedId, status, isAnimating: status === 'running' },
-      }).catch((err: unknown) => console.warn('[timelineStore] subagent insertion:patch failed:', err))
+      void window.api
+        .invoke(IPC.INSERTION_SUBAGENT_PATCH, {
+          parentTranscriptPath,
+          agentId,
+          patch: { _patch: true, id: patchedId, status, isAnimating: status === 'running' }
+        })
+        .catch((err: unknown) =>
+          console.warn('[timelineStore] subagent insertion:patch failed:', err)
+        )
     }
   }
 }
@@ -280,7 +309,7 @@ export function patchSubagentInsertion(
   parentClaudeId: string,
   agentId: string,
   id: string,
-  changes: Partial<LineInsertion>,
+  changes: Partial<LineInsertion>
 ): void {
   store.set(lineInsertionsBySessionAtom(agentId), (prev) =>
     prev.map((ins) => {
@@ -295,10 +324,17 @@ export function patchSubagentInsertion(
 
   const parentTranscriptPath = getTranscriptPath(store, parentClaudeId)
   if (parentTranscriptPath) {
-    void window.api.invoke(IPC.INSERTION_SUBAGENT_PATCH, {
-      parentTranscriptPath,
-      agentId,
-      patch: { _patch: true, id, ...changes },
-    }).catch((err: unknown) => console.warn('[timelineStore] subagent insertion:patch (patchSubagentInsertion) failed:', err))
+    void window.api
+      .invoke(IPC.INSERTION_SUBAGENT_PATCH, {
+        parentTranscriptPath,
+        agentId,
+        patch: { _patch: true, id, ...changes }
+      })
+      .catch((err: unknown) =>
+        console.warn(
+          '[timelineStore] subagent insertion:patch (patchSubagentInsertion) failed:',
+          err
+        )
+      )
   }
 }

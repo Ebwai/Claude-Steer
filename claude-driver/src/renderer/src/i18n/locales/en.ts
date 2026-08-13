@@ -249,6 +249,15 @@ const en: Record<string, string> = {
   'projectMonitor.inputBar.interrupt': 'Interrupt',
   'projectMonitor.inputBar.sending': 'Sending...',
   'projectMonitor.inputBar.send': 'Send',
+  'projectMonitor.inputBar.addResources': 'Add images and files',
+  'projectMonitor.inputBar.importing': 'Adding…',
+  'projectMonitor.inputBar.attachedResources': 'Attached resources',
+  'projectMonitor.inputBar.remove': 'Remove',
+  'projectMonitor.inputBar.closePreview': 'Close image preview',
+  'projectMonitor.inputBar.clipboardNoPath': 'This file has no usable original path; choose it with “Add images and files”.',
+  'projectMonitor.resources.related': 'Related resources',
+  'projectMonitor.resources.openFailed': 'Unable to open file',
+  'projectMonitor.resources.closePreview': 'Close image preview',
 
   // ── Project Monitor - Tools Panel (ToolsPanel) ──
   'projectMonitor.toolsPanel.title': 'Tools',

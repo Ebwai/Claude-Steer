@@ -38,6 +38,7 @@ import { findNewBranchTranscript, snapshotTranscriptIds } from './lib/pty/Branch
 import { resolveSessionStartPty } from './lib/pty/PtySessionBinding'
 import { JsonlWatcher } from './lib/jsonl/JsonlWatcher'
 import { HistoryService, resolveProjectDirectory } from './lib/history'
+import { ResourceService, openPathWithDefaultApp } from './lib/resources'
 import { GitManager } from './lib/git/GitManager'
 import { checkAllDependencies, autoInstallClaude } from './lib/deps/DependencyChecker'
 import { NotificationService } from './lib/notification/NotificationService'
@@ -73,6 +74,12 @@ import type {
   HistorySessionSealInput,
   HistoryDeleteInput,
   HistoryTokenInventoryInput,
+  ResourceImportImageInput,
+  ResourceImportPathsInput,
+  ResourceOpenInput,
+  ResourcePickInput,
+  ResourceReadImageInput,
+  ResourceSendInput,
 } from '../shared/types/index'
 import { RemoteBridgeService } from './services/RemoteBridgeService'
 import { initUpdater, checkForUpdates, downloadUpdate, quitAndInstall } from './lib/updater/index'
@@ -253,6 +260,22 @@ const confirmedBranchPtyIds = new Set<string>()  // 已确认 branch 的 ptyId�
 // claudeToPtyMap: claudeId → ptyId（用于 SESSION_INPUT 路由）
 const ptyToClaudeMap = new Map<string, string>()
 const claudeToPtyMap = new Map<string, string>()
+const resourceService = new ResourceService({
+  writeToSession: (ptyId, text) => new Promise<void>((resolve, reject) => {
+    const execute = (): void => {
+      void ptyManager.writeToSession(ptyId, text).then(resolve, reject)
+    }
+    const trustGate = trustGatesByPtyId.get(ptyId)
+    if (trustGate?.deferUntilReady(execute, 'resource-session-input')) {
+      console.info(`[ResourceService] send deferred until trusted startup is ready pty=${ptyId.slice(0, 8)}`)
+      return
+    }
+    execute()
+  }),
+  resolvePtyId: (sessionId) => claudeToPtyMap.get(sessionId) ?? sessionId,
+  resolveClaudeId: (ptyId) => ptyToClaudeMap.get(ptyId),
+  onBound: (payload) => sendToRenderers(IPC.RESOURCE_BOUND, payload),
+})
 
 function watchForBranchTranscript(
   parentPtyId: string,
@@ -330,6 +353,9 @@ function bindPtyToClaudeSession(ptyId: string, claudeId: string, transcriptPath:
   ptyToClaudeMap.set(ptyId, claudeId)
   claudeToPtyMap.set(claudeId, ptyId)
   sessionCwdMap.set(claudeId, { ptyId, cwd })
+  void resourceService.bindPtyToClaude(ptyId, claudeId, transcriptPath, cwd).catch((error: unknown) => {
+    console.error(`[ResourceService] route/recovery failed pty=${ptyId.slice(0, 8)} claude=${claudeId.slice(0, 8)}:`, error)
+  })
   markTrustGateReady(ptyId, 'claude-session-bound')
   const bindPayload = { ptyId, claudeId, transcriptPath, cwd }
   mainWindow?.webContents.send(IPC.PTY_BIND, bindPayload)
@@ -372,7 +398,7 @@ let historyService: HistoryService | null = null
 function getJsonlWatcher(): JsonlWatcher {
   if (!jsonlWatcher) {
     jsonlWatcher = new JsonlWatcher({
-      onRecord: (record, sessionId, _filePath, agentId) => {
+      onRecord: (record, sessionId, filePath, agentId) => {
         if (agentId) {
           // subagent 记录：推送到专用通道，渲染进程按 agentId 路由到子时间线
           console.log(`[JsonlWatcher→IPC] SUBAGENT sessionId=${sessionId} agentId=${agentId} type=${record.type}`)
@@ -380,6 +406,9 @@ function getJsonlWatcher(): JsonlWatcher {
         } else {
           // 主 session 记录
           mainWindow?.webContents.send(IPC.JSONL_RECORD, { sessionId, record })
+          void resourceService.handleJsonlRecord(record, sessionId, filePath).catch((error: unknown) => {
+            console.error(`[ResourceService] JSONL bind failed session=${sessionId.slice(0, 8)} file=${path.basename(filePath)}:`, error)
+          })
         }
       },
       onError: (err, filePath) => {
@@ -1595,14 +1624,52 @@ function registerIpcHandlers(): void {
     return result.canceled ? null : result.filePaths[0] ?? null
   })
 
+  ipcMain.handle(IPC.RESOURCE_PICK, async (_event, payload: ResourcePickInput) => {
+    console.info(`[ResourceIPC] pick project=${path.basename(payload.projectPath)}`)
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: [{
+        name: '图片与文件',
+        extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'md', 'markdown'],
+      }],
+    })
+    if (result.canceled) return { ok: true, resources: [], failures: [] }
+    return resourceService.importPaths({ projectPath: payload.projectPath, paths: result.filePaths })
+  })
+
+  ipcMain.handle(IPC.RESOURCE_IMPORT_PATHS, async (_event, payload: ResourceImportPathsInput) => {
+    return resourceService.importPaths(payload)
+  })
+
+  ipcMain.handle(IPC.RESOURCE_IMPORT_IMAGE, async (_event, payload: ResourceImportImageInput) => {
+    return resourceService.importImage(payload)
+  })
+
+  ipcMain.handle(IPC.RESOURCE_SEND, async (_event, payload: ResourceSendInput) => {
+    return resourceService.send(payload)
+  })
+
+  ipcMain.handle(IPC.RESOURCE_READ_IMAGE, async (_event, payload: ResourceReadImageInput) => {
+    return resourceService.readImage(payload)
+  })
+
+  ipcMain.handle(IPC.RESOURCE_OPEN, async (_event, payload: ResourceOpenInput) => {
+    return resourceService.open(payload.resource)
+  })
+
+  ipcMain.handle(IPC.RESOURCE_RELEASE_DRAFT, async () => {
+    // 图片资源为长期托管数据；移除草稿只影响 renderer 状态，主进程不得删除文件。
+    return { ok: true }
+  })
+
   ipcMain.handle(IPC.SHELL_OPEN_PATH, async (_event, targetPath: string) => {
     try {
       if (targetPath.startsWith('http://') || targetPath.startsWith('https://')) {
         await shell.openExternal(targetPath)
+        return { ok: true }
       } else {
-        await shell.openPath(targetPath)
+        return openPathWithDefaultApp(targetPath)
       }
-      return { ok: true }
     } catch (err) {
       console.error('[SHELL_OPEN_PATH] Failed to open:', targetPath, err)
       return { ok: false, error: String(err) }

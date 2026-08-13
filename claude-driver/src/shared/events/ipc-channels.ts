@@ -26,6 +26,14 @@ export const IPC = {
   SESSION_START: 'session:start',
   /** 向 PTY stdin 写入文本 */
   SESSION_INPUT: 'session:input',
+  RESOURCE_PICK: 'resource:pick',
+  RESOURCE_IMPORT_PATHS: 'resource:import-paths',
+  RESOURCE_IMPORT_IMAGE: 'resource:import-image',
+  RESOURCE_SEND: 'resource:send',
+  RESOURCE_READ_IMAGE: 'resource:read-image',
+  RESOURCE_OPEN: 'resource:open',
+  RESOURCE_RELEASE_DRAFT: 'resource:release-draft',
+  RESOURCE_BOUND: 'resource:bound',
   /** 停止正在运行的 session */
   SESSION_STOP: 'session:stop',
   /** 恢复历史 session（claude --resume） */
@@ -174,7 +182,7 @@ export const IPC = {
 
   // ── M6 S2 定时触发 ───────────────────────────────────────────────────────
   /** 读取本地持久化任务列表（含 PTY 活跃状态）renderer → main invoke */
-  SCHEDULER_LIST:   'scheduler:list',
+  SCHEDULER_LIST: 'scheduler:list',
   /** 创建新 loop 任务（或向已有 session 追加）renderer → main invoke */
   SCHEDULER_CREATE: 'scheduler:create',
   /** 暂停/恢复某个项目的 loop PTY renderer → main invoke */
@@ -241,7 +249,7 @@ export const IPC = {
 
   // ── 作者推荐 ──────────────────────────────────────────────────────
   /** 读取 author_recommend 分类推荐数据（renderer → main invoke；payload: { category }；返回 RecommendItem[]） */
-  RECOMMEND_GET: 'recommend:get',
+  RECOMMEND_GET: 'recommend:get'
 } as const
 
 /** IPC 通道名的联合类型，用于类型安全的 ipcMain.handle / ipcRenderer.invoke */

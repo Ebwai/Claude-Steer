@@ -35,7 +35,7 @@ export function pathMatchesProject(cwd: string, projectPath: string): boolean {
 export function assertSafeSessionId(sessionId: string): void {
   if (!SAFE_SESSION_ID.test(sessionId)) {
     throw Object.assign(new Error(`Unsafe history session id: ${sessionId}`), {
-      code: 'HISTORY_OUTSIDE_ROOT',
+      code: 'HISTORY_OUTSIDE_ROOT'
     })
   }
 }
@@ -49,7 +49,8 @@ export function resolveSessionBundle(claudeDir: string, sessionId: string): Sess
     path.join(base, `${sessionId}.insertions.jsonl`),
     path.join(base, `${sessionId}.milestones.jsonl`),
     path.join(base, `${sessionId}.git-marks.jsonl`),
-    path.join(base, sessionId),
+    path.join(base, `${sessionId}.resources.jsonl`),
+    path.join(base, sessionId)
   ]
   for (const candidate of candidates) assertPathInside(base, candidate)
   return { sessionId, candidates }
@@ -61,7 +62,7 @@ export function assertPathInside(rootDir: string, candidate: string): void {
   const relative = path.relative(root, resolved)
   if (!relative || (!relative.startsWith('..') && !path.isAbsolute(relative))) return
   throw Object.assign(new Error(`History path escapes project directory: ${candidate}`), {
-    code: 'HISTORY_OUTSIDE_ROOT',
+    code: 'HISTORY_OUTSIDE_ROOT'
   })
 }
 
@@ -69,9 +70,12 @@ export function assertExistingPathSafe(rootDir: string, candidate: string): void
   assertPathInside(rootDir, candidate)
   const stat = fs.lstatSync(candidate)
   if (stat.isSymbolicLink()) {
-    throw Object.assign(new Error(`Symbolic link is not a valid history deletion target: ${candidate}`), {
-      code: 'HISTORY_OUTSIDE_ROOT',
-    })
+    throw Object.assign(
+      new Error(`Symbolic link is not a valid history deletion target: ${candidate}`),
+      {
+        code: 'HISTORY_OUTSIDE_ROOT'
+      }
+    )
   }
   const realRoot = fs.realpathSync(rootDir)
   const realCandidate = fs.realpathSync(candidate)

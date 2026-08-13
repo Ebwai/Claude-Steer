@@ -17,11 +17,16 @@ import './AgentBlock.css'
 interface AgentBlockProps {
   session: Session
   block: AgentBlockState
-  agentLabel: string   // 如 "Agent1"、"主线程"
-  agentColor: string   // CSS 颜色字符串
+  agentLabel: string // 如 "Agent1"、"主线程"
+  agentColor: string // CSS 颜色字符串
 }
 
-function AgentBlock({ session, block, agentLabel, agentColor }: AgentBlockProps): React.JSX.Element {
+function AgentBlock({
+  session,
+  block,
+  agentLabel,
+  agentColor
+}: AgentBlockProps): React.JSX.Element {
   const { t } = useT()
   const store = useStore()
 
@@ -38,7 +43,7 @@ function AgentBlock({ session, block, agentLabel, agentColor }: AgentBlockProps)
     })
     // 消息发送后，跳转视口到该 session 框
     const claudeId = session.claudeId ?? session.id
-    console.log(`[AgentBlock] message sent, requesting focus on ${claudeId.slice(0,8)}`)
+    console.log(`[AgentBlock] message sent, requesting focus on ${claudeId.slice(0, 8)}`)
     store.set(focusRequestAtom, { sessionId: claudeId, ts: Date.now() })
   }, [session.claudeId, session.id, store])
 
@@ -62,10 +67,10 @@ function AgentBlock({ session, block, agentLabel, agentColor }: AgentBlockProps)
           className={`ab-dot ab-dot-${session.status.toLowerCase()}`}
           style={{ backgroundColor: agentColor }}
         />
-        <span className="ab-agent-label" style={{ color: agentColor }}>{agentLabel}</span>
-        {block.workStatusText && (
-          <span className="ab-work-status">{block.workStatusText}</span>
-        )}
+        <span className="ab-agent-label" style={{ color: agentColor }}>
+          {agentLabel}
+        </span>
+        {block.workStatusText && <span className="ab-work-status">{block.workStatusText}</span>}
         <span className={`ab-session-badge ab-badge-${session.status.toLowerCase()}`}>
           {session.status}
         </span>
@@ -82,7 +87,9 @@ function AgentBlock({ session, block, agentLabel, agentColor }: AgentBlockProps)
         <div className="ab-subagent-card">
           <span className="ab-subagent-badge">Subagent</span>
           <span className="ab-subagent-desc">{block.activeSubagent.description}</span>
-          <span className="ab-subagent-waiting">{t('projectMonitor.agentBlock.waitingForReturn')}</span>
+          <span className="ab-subagent-waiting">
+            {t('projectMonitor.agentBlock.waitingForReturn')}
+          </span>
         </div>
       )}
 
@@ -91,7 +98,9 @@ function AgentBlock({ session, block, agentLabel, agentColor }: AgentBlockProps)
         <div className="ab-insight-card">
           <span className="ab-insight-icon">◆</span>
           <span className="ab-insight-text">{block.activeInsight.slice(0, 80)}</span>
-          <button className="ab-insight-close" onClick={handleDismissInsight}>✕</button>
+          <button className="ab-insight-close" onClick={handleDismissInsight}>
+            ✕
+          </button>
         </div>
       )}
 
@@ -99,6 +108,7 @@ function AgentBlock({ session, block, agentLabel, agentColor }: AgentBlockProps)
       {isActive && (
         <MessageInputBar
           sessionId={session.id}
+          projectPath={session.cwd}
           isRunning={isActive}
           agentLabel={agentLabel}
           agentColor={agentColor}
