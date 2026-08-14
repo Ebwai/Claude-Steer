@@ -16,6 +16,48 @@
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
+/* 历史框默认沿用桌面应用的不可选策略，只在正文节点显式开放原生文字选择。 */
+.sfn-frame-history {
+  user-select: none;
+}
+
+.sfn-frame-history .sfn-header,
+.sfn-frame-history .sfn-footer,
+.sfn-frame-history .sfn-status-dot,
+.sfn-frame-history .sfn-tokens,
+.sfn-frame-history .sfn-duration,
+.sfn-frame-history .sfn-footer-tokens,
+.sfn-frame-history .sfn-milestone-badge,
+.sfn-frame-history .ptl-action-bar,
+.sfn-frame-history .ptl-submenu,
+.sfn-frame-history .ptl-expand-btn,
+.sfn-frame-history .ptl-scroll-btn,
+.sfn-frame-history .ptl-delete-placeholder,
+.sfn-frame-history .ptl-running-indicator,
+.sfn-frame-history .ptl-waiting-indicator,
+.sfn-frame-history .resource-toggle,
+.sfn-frame-history .sab-header,
+.sfn-frame-history .sab-expand-btn,
+.sfn-frame-history .ins-badge-expand,
+.sfn-frame-history .ins-spinner,
+.sfn-frame-history .ins-fail,
+.sfn-frame-history .ptl-dot,
+.sfn-frame-history .sab-dot {
+  user-select: none;
+}
+
+.sfn-frame-history .sfn-agent-label,
+.sfn-frame-history .ptl-user-text,
+.sfn-frame-history .ptl-assistant-text,
+.sfn-frame-history .ptl-tool-box,
+.sfn-frame-history .sab-user-text,
+.sfn-frame-history .sab-assistant-text,
+.sfn-frame-history .sab-tool-box,
+.sfn-frame-history .ins-badge,
+.sfn-frame-history .resource-item {
+  user-select: text;
+}
+
 .sfn-frame-selected {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
 }

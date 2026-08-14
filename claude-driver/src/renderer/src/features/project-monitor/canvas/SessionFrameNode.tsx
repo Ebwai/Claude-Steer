@@ -89,6 +89,7 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
     .filter(([, rel]) => rel.type === 'branch' && rel.parentSessionId === sessionId)
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const historySelectionLogRef = useRef(false)
   const lastMeasuredHeightRef = useRef<number | null>(null)
   const pendingMeasuredHeightRef = useRef<number | null>(null)
   const startedAt = session?.startedAt ?? 0
@@ -97,6 +98,12 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
   const displayedTokens = source === 'history' && tokenInventory ? tokenInventory.usage : sessionTokens
   const totalConsumedTokens = displayedTokens.inputTokens + displayedTokens.outputTokens +
     displayedTokens.cacheCreationTokens + displayedTokens.cacheReadTokens
+
+  useEffect(() => {
+    if (source !== 'history' || historySelectionLogRef.current) return
+    historySelectionLogRef.current = true
+    console.debug(`[SessionFrameNode] history text selection scope enabled: sessionId=${sessionId}`)
+  }, [sessionId, source])
 
   // ── Milestone badges ───────────────────────────────────────────────────────
   const allMilestones = useAtomValue(milestonesByProjectAtom(sessionProjectId))
@@ -206,7 +213,7 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
   return (
     <div
       ref={containerRef}
-      className={`sfn-frame ${selected ? 'sfn-frame-selected' : ''}`}
+      className={`sfn-frame ${source === 'history' ? 'sfn-frame-history' : ''} ${selected ? 'sfn-frame-selected' : ''}`}
       style={{
         borderColor: `${agentColor}60`,
         minHeight: source === 'history' && detailsState !== 'resident'
