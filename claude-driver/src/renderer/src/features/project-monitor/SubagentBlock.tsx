@@ -9,6 +9,7 @@ import { useAtomValue } from 'jotai'
 import { subagentTimelineAtom, lineInsertionsBySessionAtom, type TimelineNode } from '../../atoms/timeline.atom'
 import LineInsertionItem from './LineInsertionItem'
 import { useT } from '../../i18n'
+import { useDetailDisclosure, SUMMARY_LINES } from '../../hooks/useDetailDisclosure'
 import './SubagentBlock.css'
 
 interface SubagentBlockProps {
@@ -40,8 +41,17 @@ interface MiniNodeProps {
 
 function MiniNode({ node, toolResults }: MiniNodeProps): React.JSX.Element {
   const { t } = useT()
-  const [expanded, setExpanded] = useState(false)
-  const MAX_TEXT = 300
+
+  // user_input 和 assistant 节点使用统一 disclosure hook
+  const needsDisclosure = node.type === 'user_input' || node.type === 'assistant'
+  const fullText = needsDisclosure ? (node.text ?? '') : ''
+  const { expanded, toggle, summaryText, displayText, hasMore } = useDetailDisclosure({
+    detailId: node.id,
+    fullText,
+    summaryLines: SUMMARY_LINES,
+    detailRef: node.detailRef ?? undefined,
+    textTruncated: node.textTruncated,
+  })
 
   if (node.type === 'user_input') {
     return (
@@ -49,24 +59,29 @@ function MiniNode({ node, toolResults }: MiniNodeProps): React.JSX.Element {
         <span className="sab-dot sab-dot-user" />
         <div className="sab-user-bubble">
           <span className="sab-user-prefix">{t('projectMonitor.subagent.taskPrefix')}</span>
-          <span className="sab-user-text">{node.text}</span>
+          <span className="sab-user-text">{expanded ? displayText : summaryText}</span>
+          {hasMore && (
+            <button className="sab-expand-btn" onClick={toggle}>
+              {expanded ? t('projectMonitor.subagent.collapse') : t('projectMonitor.subagent.expandFullText')}
+            </button>
+          )}
         </div>
       </div>
     )
   }
 
   if (node.type === 'assistant') {
-    const text = node.text ?? ''
-    const isLong = text.length > MAX_TEXT
+    const text = expanded ? displayText : summaryText
+    if (!text) return <></>
     return (
       <div className="sab-node sab-node-assistant">
         <span className="sab-dot sab-dot-assistant" />
         <div className="sab-assistant-card">
           <div className="sab-assistant-text">
-            {isLong && !expanded ? text.slice(0, MAX_TEXT) + '…' : text}
+            {text}
           </div>
-          {isLong && (
-            <button className="sab-expand-btn" onClick={() => setExpanded((v) => !v)}>
+          {hasMore && (
+            <button className="sab-expand-btn" onClick={toggle}>
               {expanded ? t('projectMonitor.subagent.collapse') : t('projectMonitor.subagent.expandFullText')}
             </button>
           )}
@@ -108,7 +123,7 @@ function SubagentBlock({ sessionId, agentId, description: descriptionProp, dispa
   const returnInsertion = toolUseId
     ? parentInsertions.find((ins) => ins.toolUseId === toolUseId && ins.lineLabel === '返回任务结果')
     : undefined
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
 
   // 描述文本：prop > 插入线 description > 插入线 displayText
   const description = (descriptionProp

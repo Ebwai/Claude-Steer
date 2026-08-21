@@ -25,6 +25,7 @@ import { createJsonlHandler } from '../business/jsonlHandler'
 import { createStatusLineHandler } from '../business/statusLineHandler'
 import { createPermissionHandler } from '../business/permissionHandler'
 import { createContextHandler } from '../business/contextHandler'
+import { createDetailHandler } from '../business/detailHandler'
 
 type RendererStore = ReturnType<typeof useStore>
 
@@ -91,6 +92,7 @@ export function useIpcBridge(): void {
     const statusLine = createStatusLineHandler(store)
     const permission = createPermissionHandler(store)
     const context = createContextHandler(store)
+    const detail = createDetailHandler(store)
 
     // 后台扫描属于应用级初始化；StrictMode 重挂载复用同一个 promise。
     void ensureStartupTokenInventory(store).catch((err: unknown) => {
@@ -108,6 +110,7 @@ export function useIpcBridge(): void {
       ...statusLine.register(),
       ...permission.register(),
       ...context.register(),
+      ...detail.register(),
     ]
 
     // 通知队列（全局，无业务逻辑，直接在此处理）

@@ -116,6 +116,7 @@ function NotificationDetail({ requestId, requests, onDone }: NotificationDetailP
   const [extraMsg, setExtraMsg] = useState('')
   const [pending, setPending] = useState<'approve' | 'deny' | null>(null)
   const [error, setError] = useState('')
+  const [paramsExpanded, setParamsExpanded] = useState(false)
 
   const req = requests.find((r) => r.requestId === requestId) ?? null
 
@@ -145,6 +146,7 @@ function NotificationDetail({ requestId, requests, onDone }: NotificationDetailP
     setExtraMsg('')
     setPending(null)
     setError('')
+    setParamsExpanded(false)
   }, [requestId])
 
   if (!req) {
@@ -171,10 +173,17 @@ function NotificationDetail({ requestId, requests, onDone }: NotificationDetailP
         <div className="nfp-detail-tool">{req.toolName}</div>
         <div className="nfp-detail-desc">{req.description}</div>
         {hasInput && (
-          <details>
-            <summary className="nfp-input-summary">{t('notifications.viewParams')}</summary>
-            <pre className="nfp-input-json">{toolInputStr}</pre>
-          </details>
+          <>
+            <button
+              className="nfp-input-summary"
+              onClick={() => setParamsExpanded((v) => !v)}
+            >
+              {paramsExpanded ? '▲ ' : '▼ '}{t('notifications.viewParams')}
+            </button>
+            {paramsExpanded && (
+              <pre className="nfp-input-json">{toolInputStr}</pre>
+            )}
+          </>
         )}
       </div>
 

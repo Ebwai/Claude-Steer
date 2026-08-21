@@ -123,6 +123,10 @@ export interface HistoryTimelineNode {
   isGitted?: boolean
   commitHash?: string
   parsedAt: number
+  /** L1→L2 关联：HistoryService 在投影后填充，Renderer 可用于按需获取全文 */
+  detailRef?: { detailKey: string; revision: number; sourceGeneration: string; estimatedSize: number }
+  /** 标记 text 已被截断为摘要（仅 SUMMARY_LINES 行），展开时需通过 detailRef 获取全文 */
+  textTruncated?: boolean
 }
 
 export interface HistorySubagentProjection {

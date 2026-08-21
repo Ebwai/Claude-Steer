@@ -37,7 +37,7 @@ import { createTrustGate, type TrustGate } from './lib/pty/TrustGate'
 import { findNewBranchTranscript, snapshotTranscriptIds } from './lib/pty/BranchTranscriptDetector'
 import { resolveSessionStartPty } from './lib/pty/PtySessionBinding'
 import { JsonlWatcher } from './lib/jsonl/JsonlWatcher'
-import { HistoryService, resolveProjectDirectory } from './lib/history'
+import { HistoryService, createDetailService, resolveProjectDirectory } from './lib/history'
 import { ResourceService, openPathWithDefaultApp } from './lib/resources'
 import { GitManager } from './lib/git/GitManager'
 import { checkAllDependencies, autoInstallClaude } from './lib/deps/DependencyChecker'
@@ -398,23 +398,41 @@ let historyService: HistoryService | null = null
 function getJsonlWatcher(): JsonlWatcher {
   if (!jsonlWatcher) {
     jsonlWatcher = new JsonlWatcher({
-      onRecord: (record, sessionId, filePath, agentId) => {
+      onRecord: (record, sessionId, filePath, agentId, detailRef) => {
+        // 精简 IPC 载荷：只发送 4 行摘要，全文由 detailService 按需提供
+        let textTruncated = false
+        const slimRecord = record.text
+          ? (() => {
+              const lines = record.text.split('\n')
+              if (lines.length > 4) {
+                textTruncated = true
+                return { ...record, text: lines.slice(0, 4).join('\n') }
+              }
+              return record
+            })()
+          : record
         if (agentId) {
           // subagent 记录：推送到专用通道，渲染进程按 agentId 路由到子时间线
           console.log(`[JsonlWatcher→IPC] SUBAGENT sessionId=${sessionId} agentId=${agentId} type=${record.type}`)
-          mainWindow?.webContents.send(IPC.JSONL_SUBAGENT_RECORD, { sessionId, agentId, record })
+          mainWindow?.webContents.send(IPC.JSONL_SUBAGENT_RECORD, { sessionId, agentId, record: slimRecord, detailRef, textTruncated })
         } else {
           // 主 session 记录
-          mainWindow?.webContents.send(IPC.JSONL_RECORD, { sessionId, record })
+          mainWindow?.webContents.send(IPC.JSONL_RECORD, { sessionId, record: slimRecord, detailRef, textTruncated })
           void resourceService.handleJsonlRecord(record, sessionId, filePath).catch((error: unknown) => {
             console.error(`[ResourceService] JSONL bind failed session=${sessionId.slice(0, 8)} file=${path.basename(filePath)}:`, error)
           })
         }
       },
+      onRecordShell: (shell, _sessionId, _filePath, agentId) => {
+        // Shell-only 路径：当前仅日志，T4 切换 shell-only IPC
+        if (!agentId) {
+          console.info(`[JsonlWatcher] shell entityId=${shell.entityId} kind=${shell.kind} order=${shell.order}`)
+        }
+      },
       onError: (err, filePath) => {
         console.error(`[JsonlWatcher] Error on ${filePath}:`, err)
       },
-    })
+    }, getDetailService())
   }
   return jsonlWatcher
 }
@@ -424,10 +442,43 @@ function getHistoryService(): HistoryService {
     historyService = new HistoryService({
       isSessionRunning: (sessionId) => claudeToPtyMap.has(sessionId),
       unwatchSession: (sessionId) => { getJsonlWatcher().unwatchSession(sessionId) },
+      get detailService() { return getDetailService() },
     })
     console.info('[HistoryService] initialized')
   }
   return historyService
+}
+
+// ── DetailService 全局实例（统一详情权威源）────────────────────────────────
+import type { DetailService } from './lib/history'
+import type { DetailRequest } from '../shared/types/detail'
+
+let detailService: DetailService | null = null
+
+function getDetailService(): DetailService {
+  if (!detailService) {
+    detailService = createDetailService({
+      readFile: async (filePath: string, offset: number, length: number): Promise<Buffer> => {
+        const fd = await fs.promises.open(filePath, 'r')
+        try {
+          const { buffer } = await fd.read(Buffer.alloc(length), 0, length, offset)
+          return buffer.subarray(0, length)
+        } finally {
+          await fd.close()
+        }
+      },
+      sendToRenderer: (channel: string, payload: unknown) => {
+        sendToRenderers(channel, payload)
+      },
+      logger: {
+        info: (msg, meta) => console.info(msg, meta ?? ''),
+        warn: (msg, meta) => console.warn(msg, meta ?? ''),
+        error: (msg, meta) => console.error(msg, meta ?? ''),
+      }
+    })
+    console.info('[DetailService] initialized')
+  }
+  return detailService
 }
 
 /**
@@ -1847,6 +1898,18 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.HISTORY_TOKEN_INVENTORY, async (_event, payload: HistoryTokenInventoryInput) => {
     console.info(`[ipc] history:token-inventory request=${payload.requestId} project=${payload.projectId}`)
     return getHistoryService().scanTokenInventory(payload)
+  })
+
+  // ── 统一详情请求 handler ────────────────────────────────────────────────────
+  ipcMain.handle(IPC.DETAIL_REQUEST, async (_event, payload: DetailRequest) => {
+    console.info(`[ipc] detail:request key=${payload.detailKey} revision=${payload.revision}`)
+    return getDetailService().handleDetailRequest(payload)
+  })
+
+  ipcMain.handle(IPC.DETAIL_CANCEL, async (_event, payload: { detailKey: string }) => {
+    console.info(`[ipc] detail:cancel key=${payload.detailKey}`)
+    getDetailService().cancelByDetailKey(payload.detailKey)
+    return { ok: true }
   })
 
   ipcMain.handle(IPC.RUNTIME_RESOURCE_SNAPSHOT, async (

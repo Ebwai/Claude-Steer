@@ -214,7 +214,7 @@ describe('history catalog and deletion', () => {
         .join('\n') + '\n'
     )
 
-    const projection = await loadHistoryClusterProjection(snapshot(claudeDir, entries), 'root')
+    const { projection } = await loadHistoryClusterProjection(snapshot(claudeDir, entries), 'root')
     const branch = projection.sessions.find((item) => item.sessionId === 'branch')
 
     expect(branch?.timeline.filter((node) => node.isBranchStart).map((node) => node.id)).toEqual([

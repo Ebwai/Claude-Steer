@@ -7,4 +7,5 @@ export { scanHistoryCatalog, buildHistoryClusters, historyClusterSortKey } from 
 export { loadHistoryClusterProjection } from './HistoryDetailLoader'
 export { scanHistoryTokenInventory } from './HistoryTokenInventory'
 export { deleteHistoryTarget, recoverHistoryDeleteTransactions } from './HistoryDeletion'
+export { createDetailService, type DetailService, type DetailServiceDeps } from './DetailService'
 export * from './HistoryPaths'

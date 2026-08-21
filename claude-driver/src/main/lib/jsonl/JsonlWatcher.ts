@@ -10,8 +10,52 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { parseJsonlLine, extractSessionIdFromPath, extractSubagentInfo, type JsonlRecord } from './JsonlParser'
+import { resolveEntityId, deriveEntityKind } from './entityId'
+import { buildEntityShell } from './shellBuilder'
+import type { EntityShell, DetailRef } from '../../../shared/types/detail'
+import type { DetailService } from '../history/DetailService'
 
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects')
+
+// ── Buffer framing 辅助 ─────────────────────────────────────────────────────
+
+interface CompleteLine {
+  lineBytes: Buffer
+  lineEnding: 'lf' | 'crlf'
+}
+
+/**
+ * 从 Buffer 中提取所有以 LF（0x0A）结尾的完整行。
+ * UTF-8 安全：LF (0x0A) 不会出现在多字节续接字节（0x80-0xBF）中，因此 Buffer.indexOf(0x0A) 不会误判。
+ * 返回 completeLines（每条不含行尾符）和 remainder（最后 LF 之后的不完整字节）。
+ */
+function extractCompleteLines(buffer: Buffer): {
+  completeLines: CompleteLine[]
+  remainder: Buffer
+} {
+  const completeLines: CompleteLine[] = []
+  let searchStart = 0
+
+  while (searchStart < buffer.length) {
+    const lfIndex = buffer.indexOf(0x0A, searchStart)
+    if (lfIndex === -1) break
+
+    // 检测 CRLF：lfIndex > 0 且前一字节为 CR (0x0D)
+    const isCRLF = lfIndex > 0 && buffer[lfIndex - 1] === 0x0D
+    const lineEnd = isCRLF ? lfIndex - 1 : lfIndex
+    const lineBytes = buffer.subarray(searchStart, lineEnd)
+    completeLines.push({
+      lineBytes,
+      lineEnding: isCRLF ? 'crlf' : 'lf'
+    })
+    searchStart = lfIndex + 1
+  }
+
+  return {
+    completeLines,
+    remainder: buffer.subarray(searchStart)
+  }
+}
 
 export interface JsonlWatcherCallbacks {
   /**
@@ -19,9 +63,12 @@ export interface JsonlWatcherCallbacks {
    * @param sessionId 父 session 的 PTY UUID（通过 watchFile 注册的 key）
    * @param filePath  来源文件路径
    * @param agentId   subagent ID（主 session 记录为 undefined）
+   * @param detailRef L1→L2 关联（DetailService 注册后返回，供 renderer 按需获取全文）
    */
-  onRecord: (record: JsonlRecord, sessionId: string, filePath: string, agentId?: string) => void
+  onRecord: (record: JsonlRecord, sessionId: string, filePath: string, agentId?: string, detailRef?: DetailRef) => void
   onError: (err: Error, filePath: string) => void
+  /** Shell-only 路径：EntityShell 首次解析时触发（可选，不影响现有调用方） */
+  onRecordShell?: (shell: EntityShell, sessionId: string, filePath: string, agentId?: string) => void
 }
 
 interface WatchedFile {
@@ -41,6 +88,10 @@ interface WatchedFile {
   branchStartMarked?: boolean
   /** 持有该文件监听的 Session consumer lease key。 */
   consumers: Set<string>
+  /** 跨 chunk 未完成字节（UTF-8 多字节或不完整行尾），0.5.0 新增 */
+  tailBuffer: Buffer
+  /** 确定性 fallback 用 0-based 序号（每 file 独立），0.5.0 新增 */
+  sessionRecordOrdinal: number
 }
 
 interface WatchedDirectory {
@@ -62,9 +113,11 @@ export class JsonlWatcher {
   private watchedDirectories = new Map<string, WatchedDirectory>()
   private activeStreamsByFile = new Map<string, Set<fs.ReadStream>>()
   private callbacks: JsonlWatcherCallbacks
+  private detailService?: DetailService
 
-  constructor(callbacks: JsonlWatcherCallbacks) {
+  constructor(callbacks: JsonlWatcherCallbacks, detailService?: DetailService) {
     this.callbacks = callbacks
+    this.detailService = detailService
   }
 
   /**
@@ -93,6 +146,8 @@ export class JsonlWatcher {
         agentId,
         readOffset: initialOffset,
         consumers: new Set([consumerKey]),
+        tailBuffer: Buffer.alloc(0),
+        sessionRecordOrdinal: 0,
       })
 
       if (readFromStart) {
@@ -284,6 +339,8 @@ export class JsonlWatcher {
             agentId: subagentInfo.agentId,
             readOffset: 0,
             consumers,
+            tailBuffer: Buffer.alloc(0),
+            sessionRecordOrdinal: 0,
           })
           console.log(`[JsonlWatcher] Subagent JSONL detected: ${filePath} (agentId: ${subagentInfo.agentId}, parentSession: ${sessionId})`)
         } else {
@@ -295,6 +352,8 @@ export class JsonlWatcher {
               sessionId,
               readOffset: 0,
               consumers: new Set([this.consumerKey(sessionId, 'project-discovery')]),
+              tailBuffer: Buffer.alloc(0),
+              sessionRecordOrdinal: 0,
             })
             console.log(`[JsonlWatcher] New JSONL detected: ${filePath}`)
           }
@@ -375,6 +434,8 @@ export class JsonlWatcher {
           agentId: subagentInfo.agentId,
           readOffset: 0,
           consumers,
+          tailBuffer: Buffer.alloc(0),
+          sessionRecordOrdinal: 0,
         })
       } else {
         const sessionId = extractSessionIdFromPath(filePath)
@@ -384,6 +445,8 @@ export class JsonlWatcher {
             sessionId,
             readOffset: 0,
             consumers: new Set([this.consumerKey(sessionId, 'project-discovery')]),
+            tailBuffer: Buffer.alloc(0),
+            sessionRecordOrdinal: 0,
           })
         }
       }
@@ -413,6 +476,8 @@ export class JsonlWatcher {
           agentId: subagentInfo.agentId,
           readOffset: 0,
           consumers: this.findSessionConsumers(parentSessionId),
+          tailBuffer: Buffer.alloc(0),
+          sessionRecordOrdinal: 0,
         })
         this.watcher?.add(filePath)
         console.log(`[JsonlWatcher] Existing subagent file found: ${filePath} (agentId: ${subagentInfo.agentId})`)
@@ -424,7 +489,7 @@ export class JsonlWatcher {
     }
   }
 
-  /** Tail 增量读取：只读 readOffset 之后的新内容 */
+  /** Tail 增量读取：Buffer framing，只读 readOffset 之后的新内容 */
   private readNewContent(filePath: string): void {
     const watched = this.watchedFiles.get(filePath)
     if (!watched) return
@@ -433,94 +498,41 @@ export class JsonlWatcher {
       const stat = fs.statSync(filePath)
       if (stat.size <= watched.readOffset) return
 
-      // 只读新增 bytes
+      // Buffer framing：无 encoding，按 Buffer 读取以记录精确 byte range
       const stream = fs.createReadStream(filePath, {
         start: watched.readOffset,
         end: stat.size - 1,
-        encoding: 'utf-8'
       })
       const activeStreams = this.activeStreamsByFile.get(filePath) ?? new Set<fs.ReadStream>()
       activeStreams.add(stream)
       this.activeStreamsByFile.set(filePath, activeStreams)
 
-      let buffer = ''
+      // tailBuffer 中的字节已在前一次 readOffset 范围内被读取但未处理
+      // unprocessedBase = readOffset - tailBuffer.length 对齐到文件中的真实 byte 起始位置
+      const unprocessedBase = watched.readOffset - watched.tailBuffer.length
+      let pendingBytes = watched.tailBuffer
+      let lineByteOffset = unprocessedBase
 
       stream.on('data', (chunk) => {
-        buffer += chunk as string
+        const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+        pendingBytes = Buffer.concat([pendingBytes, bytes])
+        const { completeLines, remainder } = extractCompleteLines(pendingBytes)
+
+        for (const { lineBytes, lineEnding } of completeLines) {
+          const byteStart = lineByteOffset
+          const byteEndExclusive = byteStart + lineBytes.length + (lineEnding === 'crlf' ? 2 : 1)
+          this.processLine(watched, filePath, lineBytes, byteStart, byteEndExclusive, lineEnding)
+          lineByteOffset = byteEndExclusive
+        }
+
+        pendingBytes = remainder
       })
 
       stream.on('end', () => {
         if (this.watchedFiles.get(filePath) !== watched) return
         watched.readOffset = stat.size
-
-        // 按行分割。先扫描整个新增批次的 Branch 元信息，再逐行解析：
-        // 旧版 Branch 可能包含父会话前缀并依赖 file-history-snapshot，必须优先沿用 snapshot；
-        // Claude Code 2.1.197 的 Branch JSONL 不再写 snapshot：继承的父历史记录带 forkedFrom，
-        // 随后的 Branch 本地记录不带 forkedFrom，此时第一条本地 user 才是 Branch 起点。
-        const lines = buffer.split('\n')
-        const rawLines = lines.map((line) => {
-          if (!line.trim()) return { line, raw: null as Record<string, unknown> | null }
-          try {
-            return { line, raw: JSON.parse(line) as Record<string, unknown> }
-          } catch {
-            return { line, raw: null as Record<string, unknown> | null }
-          }
-        })
-        if (rawLines.some(({ raw }) => raw?.['type'] === 'file-history-snapshot')) {
-          watched.hasHistorySnapshot = true
-        }
-        if (rawLines.some(({ raw }) => {
-          const forkedFrom = raw?.['forkedFrom']
-          return typeof forkedFrom === 'object'
-            && forkedFrom !== null
-            && typeof (forkedFrom as Record<string, unknown>)['sessionId'] === 'string'
-        })) {
-          watched.isBranchTranscript = true
-        }
-
-        for (const { line, raw } of rawLines) {
-          if (!line.trim()) continue
-
-          // 追踪 file-history-snapshot：下一条可解析的普通 user 记录标记为 isBranchStart。
-          // attachment/system 等不可见元数据行不能提前消费 pending 标记。
-          if (raw?.['type'] === 'file-history-snapshot') {
-            watched.prevWasHistorySnapshot = true
-          }
-
-          const record = parseJsonlLine(line)
-          if (record) {
-            record.sessionId = watched.sessionId
-            // 若为 subagent 文件，确保 agentId 字段已填充
-            if (watched.agentId && !record.agentId) {
-              record.agentId = watched.agentId
-              record.isSidechain = true
-            }
-            // 旧版：snapshot 后第一条 user；新版无 snapshot：跳过带 forkedFrom 的继承前缀，
-            // 将第一条不带 forkedFrom 的 Branch 本地 user 标为起点。
-            const isSnapshotStart = watched.prevWasHistorySnapshot === true && record.type === 'user'
-            const forkedFrom = raw?.['forkedFrom']
-            const rawIsInheritedForkRecord = typeof forkedFrom === 'object'
-              && forkedFrom !== null
-              && typeof (forkedFrom as Record<string, unknown>)['sessionId'] === 'string'
-            const isForkedFromFallbackStart = !watched.hasHistorySnapshot
-              && watched.isBranchTranscript
-              && !watched.branchStartMarked
-              && !rawIsInheritedForkRecord
-              && record.type === 'user'
-            if (isSnapshotStart || isForkedFromFallbackStart) {
-              record.isBranchStart = true
-              watched.branchStartMarked = true
-              watched.prevWasHistorySnapshot = false
-              console.log(
-                `[JsonlWatcher] Branch start marked session=${watched.sessionId} strategy=${isSnapshotStart ? 'snapshot' : 'forkedFrom-boundary-user'} uuid=${record.uuid ?? 'none'}`,
-              )
-            }
-            // raw 只服务于本次主进程分支边界判断；跨 IPC 前立即断开大对象引用。
-            delete record.raw
-            if (this.watchedFiles.get(filePath) !== watched) return
-            this.callbacks.onRecord(record, watched.sessionId, filePath, watched.agentId)
-          }
-        }
+        // 保留未完成字节（不完整 UTF-8 或无 LF 的尾行），等待下次 append 补充
+        watched.tailBuffer = pendingBytes
       })
 
       stream.on('close', () => {
@@ -538,6 +550,109 @@ export class JsonlWatcher {
         console.error(`[JsonlWatcher] stat error for ${filePath}:`, err)
       }
     }
+  }
+
+  /**
+   * 处理一条完整行（Buffer framing 已验证完整性）。
+   * 1. UTF-8 解码  2. Branch 元数据预检  3. parseJsonlLine  4. EntityId  5. EntityShell
+   * 6. DetailService 注册  7. onRecord + onRecordShell
+   */
+  private processLine(
+    watched: WatchedFile,
+    filePath: string,
+    lineBytes: Buffer,
+    byteStart: number,
+    byteEndExclusive: number,
+    lineEnding: 'lf' | 'crlf'
+  ): void {
+    const line = lineBytes.toString('utf-8')
+    if (!line.trim()) return
+
+    // 1. Branch 元数据预检（解析 raw JSON，不创建 JsonlRecord）
+    let raw: Record<string, unknown> | null = null
+    try {
+      raw = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      return
+    }
+    if (!raw || typeof raw !== 'object') return
+
+    // 追踪 file-history-snapshot（最高优先级）
+    if (raw['type'] === 'file-history-snapshot') {
+      watched.hasHistorySnapshot = true
+      watched.prevWasHistorySnapshot = true
+    }
+
+    // 追踪 forkedFrom 声明
+    const forkedFrom = raw['forkedFrom']
+    const rawIsInheritedForkRecord = typeof forkedFrom === 'object'
+      && forkedFrom !== null
+      && typeof (forkedFrom as Record<string, unknown>)['sessionId'] === 'string'
+    if (rawIsInheritedForkRecord) {
+      watched.isBranchTranscript = true
+    }
+
+    // 2. parseJsonlLine → JsonlRecord
+    const record = parseJsonlLine(line)
+    if (!record) return
+
+    record.sessionId = watched.sessionId
+    if (watched.agentId && !record.agentId) {
+      record.agentId = watched.agentId
+      record.isSidechain = true
+    }
+
+    // 3. Branch 起点标记（保持原有逻辑）
+    const isSnapshotStart = watched.prevWasHistorySnapshot === true && record.type === 'user'
+    const isForkedFromFallbackStart = !watched.hasHistorySnapshot
+      && watched.isBranchTranscript
+      && !watched.branchStartMarked
+      && !rawIsInheritedForkRecord
+      && record.type === 'user'
+    if (isSnapshotStart || isForkedFromFallbackStart) {
+      record.isBranchStart = true
+      watched.branchStartMarked = true
+      watched.prevWasHistorySnapshot = false
+      console.log(
+        `[JsonlWatcher] Branch start marked session=${watched.sessionId} strategy=${isSnapshotStart ? 'snapshot' : 'forkedFrom-boundary-user'} uuid=${record.uuid ?? 'none'}`,
+      )
+    }
+
+    // 4. EntityId + kind
+    const ordinal = watched.sessionRecordOrdinal++
+    const { entityId } = resolveEntityId(record, watched.sessionId, byteStart, byteEndExclusive, ordinal)
+    const kind = deriveEntityKind(record)
+
+    // 5. EntityShell + EntityLocator
+    const generation = this.detailService?.getCurrentGeneration() ?? 'gen-0'
+    const { shell, locator } = buildEntityShell({
+      entityId,
+      record,
+      kind,
+      byteStart,
+      byteEndExclusive,
+      lineEnding,
+      order: ordinal,
+      filePath,
+      sourceGeneration: generation,
+    })
+
+    // 6. DetailService 注册（返回带真实 revision 的 DetailRef）
+    if (this.detailService) {
+      const detailRef = this.detailService.registerEntity(
+        entityId, locator, generation, shell.estimatedSize
+      )
+      shell.detailRef = detailRef
+      shell.revision = detailRef.revision
+    }
+
+    // 7. 向后兼容：完整 JsonlRecord IPC（保持现有管线不中断）
+    delete record.raw
+    if (this.watchedFiles.get(filePath) !== watched) return
+    this.callbacks.onRecord(record, watched.sessionId, filePath, watched.agentId, shell.detailRef ?? undefined)
+
+    // 8. Shell-only 路径（可选，当前仅日志，T4 切换 shell-only IPC）
+    this.callbacks.onRecordShell?.(shell, watched.sessionId, filePath, watched.agentId)
   }
 
   private getFileSize(filePath: string): number {

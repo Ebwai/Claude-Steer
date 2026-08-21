@@ -53,10 +53,12 @@ function buildInsightInsertion(
 }
 
 export function createJsonlHandler(store: Store) {
-  function handleRecord(rawId: string, record: JsonlRecord): void {
+  function handleRecord(rawId: string, record: JsonlRecord, detailRef?: { detailKey: string; revision: number; sourceGeneration: string; estimatedSize: number }, textTruncated?: boolean): void {
     const claudeId = resolveTimelineKey(rawId, getBindings(store))
     const node = jsonlRecordToNode(record)
     if (node) {
+      if (detailRef) node.detailRef = detailRef
+      if (textTruncated) node.textTruncated = true
       appendTimelineNode(store, claudeId, node)
     }
 
@@ -102,10 +104,12 @@ export function createJsonlHandler(store: Store) {
     }
   }
 
-  function handleSubagentRecord(rawId: string, agentId: string, record: JsonlRecord): void {
+  function handleSubagentRecord(rawId: string, agentId: string, record: JsonlRecord, detailRef?: { detailKey: string; revision: number; sourceGeneration: string; estimatedSize: number }, textTruncated?: boolean): void {
     const claudeId = resolveTimelineKey(rawId, getBindings(store))
     const node = jsonlRecordToNode(record)
     if (node) {
+      if (detailRef) node.detailRef = detailRef
+      if (textTruncated) node.textTruncated = true
       const key = `${claudeId}::${agentId}`
       store.set(subagentTimelineAtom(key), (prev) => {
         if (prev.some((n) => n.id === node.id)) return prev
@@ -142,20 +146,22 @@ export function createJsonlHandler(store: Store) {
   function register(): Array<() => void> {
     return [
       window.api.on(IPC.JSONL_RECORD, (data: unknown) => {
-        const { sessionId, record } = data as { sessionId: string; record: JsonlRecord }
-        handleRecord(sessionId, record)
+        const { sessionId, record, detailRef, textTruncated } = data as { sessionId: string; record: JsonlRecord; detailRef?: { detailKey: string; revision: number; sourceGeneration: string; estimatedSize: number }; textTruncated?: boolean }
+        handleRecord(sessionId, record, detailRef, textTruncated)
       }),
       window.api.on(IPC.JSONL_RECORDS, (data: unknown) => {
         const { sessionId, records } = data as { sessionId: string; records: JsonlRecord[] }
         handleBatchRecords(sessionId, records)
       }),
       window.api.on(IPC.JSONL_SUBAGENT_RECORD, (data: unknown) => {
-        const { sessionId, agentId, record } = data as {
+        const { sessionId, agentId, record, detailRef, textTruncated } = data as {
           sessionId: string
           agentId: string
           record: JsonlRecord
+          detailRef?: { detailKey: string; revision: number; sourceGeneration: string; estimatedSize: number }
+          textTruncated?: boolean
         }
-        handleSubagentRecord(sessionId, agentId, record)
+        handleSubagentRecord(sessionId, agentId, record, detailRef, textTruncated)
       }),
       window.api.on(IPC.JSONL_SUBAGENT_INSERTIONS, (data: unknown) => {
         const { sessionId, agentId, insertions } = data as {

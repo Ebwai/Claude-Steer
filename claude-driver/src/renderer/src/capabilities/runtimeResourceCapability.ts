@@ -36,6 +36,7 @@ import { branchCountAtom, sessionRelationsAtom } from '@renderer/atoms/branch.at
 import { milestonesByProjectAtom, projectByIdAtom } from '@renderer/atoms/projects.atom'
 import { pathMatches } from '@renderer/utils/pathUtils'
 import { clearHistoryProject } from './historyCapability'
+import { clearHeavyContentBySession } from '../business/toolActivityHandler'
 
 type Store = Pick<TestStore, 'get' | 'set'>
 
@@ -152,6 +153,7 @@ export function releaseSessionRuntime(
   if (shouldDestroyShared) {
     store.set(timelineBySessionAtom(sessionId), [])
     store.set(lineInsertionsBySessionAtom(sessionId), [])
+    clearHeavyContentBySession(sessionId)
     store.set(subagentIdsAtom(sessionId), [])
     store.set(nodeYOffsetsAtom(sessionId), [])
     store.set(cursorNodeIndexAtom(sessionId), -1)

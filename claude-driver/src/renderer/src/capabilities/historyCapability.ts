@@ -11,6 +11,7 @@ import type {
   HistoryDeleteResult,
   HistoryOpenResult,
   HistorySessionSealResult,
+  HistoryTimelineNode,
 } from '@shared/types/history'
 import { activeSessionsAtom } from '@renderer/atoms/session-core.atom'
 import {
@@ -35,6 +36,38 @@ import { FRAME_GAP_X, FRAME_WIDTH } from '../hooks/useSessionFrameLayout'
 import type { TestStore } from '../../../__tests__/helpers/createTestStore'
 
 type Store = Pick<TestStore, 'get' | 'set'>
+
+/** 摘要行数：与 useDetailDisclosure.SUMMARY_LINES 保持一致 */
+const SUMMARY_LINES = 4
+
+/**
+ * 对投影中的 TimelineNode 执行 L1 摘要截断。
+ * 被截断的节点：text 截断为 SUMMARY_LINES 行，保留 detailRef（全文通过 detailCapability 按需获取）。
+ * 未截断的节点：保持原文，移除 detailRef（不需要按需加载）。
+ * 无 detailRef 的节点：保持原文（向后兼容旧投影）。
+ * 返回新的节点数组（不修改原始 projection）。
+ */
+function truncateProjectionText(nodes: HistoryTimelineNode[]): HistoryTimelineNode[] {
+  let truncated = false
+  const result = nodes.map((node) => {
+    if (!node.detailRef || node.text === undefined) return node
+    const lines = node.text.split('\n')
+    if (lines.length <= SUMMARY_LINES) {
+      // 短文本不需要 detailRef，清除以避免显示多余的展开按钮
+      const { detailRef: _, ...rest } = node
+      truncated = true
+      return rest as HistoryTimelineNode
+    }
+    truncated = true
+    return { ...node, text: lines.slice(0, SUMMARY_LINES).join('\n'), textTruncated: true }
+  })
+  if (truncated) {
+    const before = nodes.reduce((s, n) => s + (n.text?.length ?? 0), 0)
+    const after = result.reduce((s, n) => s + (n.text?.length ?? 0), 0)
+    console.info(`[HistoryCapability] truncated projection text ${before} -> ${after} chars`)
+  }
+  return truncated ? result : nodes
+}
 
 function sortedClusters<T extends { startedAt: number; clusterId: string }>(clusters: T[]): T[] {
   return [...clusters].sort((a, b) => a.startedAt - b.startedAt || a.clusterId.localeCompare(b.clusterId))
@@ -340,7 +373,8 @@ export function commitClusterProjection(
 
   for (const session of projection.sessions) {
     // 数组所有权直接转移到 keyed atoms；不再创建 HistoryClusterDetails/JsonlRecord[] 双份。
-    store.set(timelineBySessionAtom(session.sessionId), session.timeline)
+    // L1 摘要截断：有 detailRef 的节点只保留 4 行摘要，全文通过 detailCapability 按需获取。
+    store.set(timelineBySessionAtom(session.sessionId), truncateProjectionText(session.timeline))
     store.set(lineInsertionsBySessionAtom(session.sessionId), session.insertions)
     const agentIds = session.subagents.map((item) => item.agentId)
     subagentIdsBySession.set(session.sessionId, agentIds)
@@ -348,7 +382,7 @@ export function commitClusterProjection(
     frozenHeightBySession.set(session.sessionId, frameHeights.get(session.sessionId) ?? 400)
     store.set(subagentIdsAtom(session.sessionId), agentIds)
     for (const subagent of session.subagents) {
-      store.set(subagentTimelineAtom(`${session.sessionId}::${subagent.agentId}`), subagent.timeline)
+      store.set(subagentTimelineAtom(`${session.sessionId}::${subagent.agentId}`), truncateProjectionText(subagent.timeline))
     }
     store.set(milestonesByProjectAtom(projectId), (prev) => [
       ...prev.filter((item) => item.sessionId !== session.sessionId),

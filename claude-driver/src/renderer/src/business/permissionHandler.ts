@@ -11,6 +11,47 @@ import type { TestStore } from '../../../__tests__/helpers/createTestStore'
 
 type Store = Pick<TestStore, 'get' | 'set'>
 
+/** 预览截断长度 */
+const PREVIEW_MAX = 200
+
+/**
+ * 从 toolInput 中只提取 buildDetailText 所需的轻量字段。
+ * 避免将完整 tool_input（可含大段文件内容/JSON）常驻 permissionRequestsAtom。
+ */
+function slimToolInput(toolName: string, raw: Record<string, unknown>): Record<string, unknown> {
+  const pick = (...keys: string[]) => {
+    const out: Record<string, unknown> = {}
+    for (const k of keys) {
+      const v = raw[k]
+      if (v !== undefined) {
+        out[k] = typeof v === 'string' && v.length > PREVIEW_MAX ? v.slice(0, PREVIEW_MAX) + '…' : v
+      }
+    }
+    return out
+  }
+  switch (toolName) {
+    case 'Read': return pick('file_path', 'offset', 'limit')
+    case 'Write': return pick('file_path')
+    case 'Edit': return pick('file_path', 'replace_all')
+    case 'MultiEdit': return pick('file_path', 'editCount')
+    case 'Bash': return pick('command', 'description', 'dangerouslyDisableSandbox')
+    case 'Grep': return pick('pattern', 'path', 'include')
+    case 'Glob': return pick('pattern', 'path')
+    case 'WebFetch': return pick('url')
+    case 'WebSearch': return pick('query', 'allowed_domains')
+    default: {
+      // 通用工具/MCP：保留 displayName + description + 摘要
+      const out: Record<string, unknown> = {}
+      if (raw['displayName']) out['displayName'] = raw['displayName']
+      if (raw['description']) {
+        const desc = String(raw['description'])
+        out['description'] = desc.length > PREVIEW_MAX ? desc.slice(0, PREVIEW_MAX) + '…' : desc
+      }
+      return out
+    }
+  }
+}
+
 export function createPermissionHandler(store: Store) {
   function handlePermissionRequest(hookEvent: HookEvent): void {
     const p = hookEvent.payload as {
@@ -30,7 +71,7 @@ export function createPermissionHandler(store: Store) {
       ptySessionId,
       agentName,
       toolName: p.tool_name ?? 'Unknown',
-      toolInput: p.tool_input ?? {},
+      toolInput: slimToolInput(p.tool_name ?? 'Unknown', (p.tool_input ?? {}) as Record<string, unknown>),
       description: p.description ?? `请求执行 ${p.tool_name ?? '操作'}`,
       receivedAt: hookEvent.receivedAt,
     }

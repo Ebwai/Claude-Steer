@@ -16,6 +16,36 @@ import type { TestStore } from '../../../__tests__/helpers/createTestStore'
 
 type Store = Pick<TestStore, 'get' | 'set'>
 
+// ── 轻量/重内容分离存储 ──────────────────────────────────────────────────────
+// badgeContent 只存轻量预览字段，重内容（文件全文、编辑 diff 等）存入模块级 Map。
+// LineInsertionItem 展开时从此 Map 读取，收起后引用随组件生命周期释放。
+// Session 终止时由 runtimeResourceCapability 调用 clearHeavyContentBySession 清理。
+
+/** insertion id → 重 badgeContent 字段 */
+const heavyBadgeStore = new Map<string, Record<string, string>>()
+
+/** 预览截断长度 */
+const PREVIEW_MAX = 200
+
+/** 清理指定 session 的全部重内容（由 runtimeResourceCapability 调用） */
+export function clearHeavyContentBySession(sessionIdPrefix: string): void {
+  for (const key of heavyBadgeStore.keys()) {
+    if (key.startsWith(sessionIdPrefix)) {
+      heavyBadgeStore.delete(key)
+    }
+  }
+}
+
+/** 获取指定 insertion 的重 badgeContent 字段（由 LineInsertionItem 调用） */
+export function getHeavyBadgeContent(insertionId: string): Record<string, string> | undefined {
+  return heavyBadgeStore.get(insertionId)
+}
+
+/** 截断到 PREVIEW_MAX，超出加 … */
+function preview(s: string): string {
+  return s.length > PREVIEW_MAX ? s.slice(0, PREVIEW_MAX) + '…' : s
+}
+
 /** 工具名 → 工作状态词 */
 function toolNameToWorkStatus(toolName: string): string {
   const map: Record<string, string> = {
@@ -33,105 +63,114 @@ function categorizeToolName(toolName: string): 'tool' | 'mcp' {
 }
 
 /**
- * 从 tool_input 提取各工具专属字段存入 badgeContent
- * 所有值为字符串（badgeContent 是 Record<string, string>）
- * 内容全文存储，不截断（截断在渲染层处理）
+ * 从 tool_input 提取各工具专属字段，分为轻量（badgeContent）和重内容（heavyBadgeStore）。
+ * 轻量字段存入 badgeContent（跟随 LineInsertion 进入 timeline atom）。
+ * 重内容存入 heavyBadgeStore（模块级 Map，展开时按需读取，不进入 atom）。
+ * 返回 { light, heavy }，heavy 可能为空对象。
  */
 function extractToolBadgeFields(
   toolName: string,
-  toolInput: Record<string, unknown>
-): Record<string, string> {
-  const f: Record<string, string> = {}
+  toolInput: Record<string, unknown>,
+  insertionId: string,
+): { light: Record<string, string>; heavy: Record<string, string> } {
+  const light: Record<string, string> = {}
+  const heavy: Record<string, string> = {}
 
   switch (toolName) {
     case 'Read': {
-      f.filePath = String(toolInput['file_path'] ?? '')
+      light.filePath = String(toolInput['file_path'] ?? '')
       if (toolInput['offset'] !== undefined) {
         const offset = Number(toolInput['offset'])
         const limit = toolInput['limit'] !== undefined ? Number(toolInput['limit']) : undefined
-        f.rangeLabel = limit !== undefined
+        light.rangeLabel = limit !== undefined
           ? `L${offset}-${offset + limit - 1}`
           : `from L${offset}`
       }
       break
     }
     case 'Write': {
-      f.filePath = String(toolInput['file_path'] ?? '')
+      light.filePath = String(toolInput['file_path'] ?? '')
       if (typeof toolInput['content'] === 'string') {
-        f.contentFull = toolInput['content'] as string
+        heavy.contentFull = toolInput['content'] as string
       }
       break
     }
     case 'Edit': {
-      f.filePath = String(toolInput['file_path'] ?? '')
-      if (typeof toolInput['old_string'] === 'string') f.oldFull = toolInput['old_string'] as string
-      if (typeof toolInput['new_string'] === 'string') f.newFull = toolInput['new_string'] as string
-      if (toolInput['replace_all']) f.replaceAll = 'true'
+      light.filePath = String(toolInput['file_path'] ?? '')
+      if (typeof toolInput['old_string'] === 'string') heavy.oldFull = toolInput['old_string'] as string
+      if (typeof toolInput['new_string'] === 'string') heavy.newFull = toolInput['new_string'] as string
+      if (toolInput['replace_all']) light.replaceAll = 'true'
       break
     }
     case 'MultiEdit': {
-      f.filePath = String(toolInput['file_path'] ?? '')
+      light.filePath = String(toolInput['file_path'] ?? '')
       if (Array.isArray(toolInput['edits'])) {
-        f.editCount = String((toolInput['edits'] as Array<unknown>).length)
-        f.editsJson = JSON.stringify(toolInput['edits'])
+        light.editCount = String((toolInput['edits'] as Array<unknown>).length)
+        heavy.editsJson = JSON.stringify(toolInput['edits'])
       }
       break
     }
     case 'Bash': {
-      f.command = String(toolInput['command'] ?? '')
-      f.description = String(toolInput['description'] ?? '')
-      if (toolInput['dangerouslyDisableSandbox']) f.isSandboxDisabled = 'true'
+      light.command = preview(String(toolInput['command'] ?? ''))
+      light.description = preview(String(toolInput['description'] ?? ''))
+      if (toolInput['dangerouslyDisableSandbox']) light.isSandboxDisabled = 'true'
       break
     }
     case 'Grep': {
-      f.pattern = String(toolInput['pattern'] ?? '')
-      f.searchPath = String(toolInput['path'] ?? '')
-      f.include = String(toolInput['include'] ?? '')
+      light.pattern = String(toolInput['pattern'] ?? '')
+      light.searchPath = String(toolInput['path'] ?? '')
+      light.include = String(toolInput['include'] ?? '')
       break
     }
     case 'Glob': {
-      f.pattern = String(toolInput['pattern'] ?? toolInput['path'] ?? '')
+      light.pattern = String(toolInput['pattern'] ?? toolInput['path'] ?? '')
       break
     }
     case 'WebFetch': {
-      f.url = String(toolInput['url'] ?? '')
-      if (typeof toolInput['prompt'] === 'string') f.prompt = toolInput['prompt'] as string
+      light.url = String(toolInput['url'] ?? '')
+      if (typeof toolInput['prompt'] === 'string') heavy.prompt = toolInput['prompt'] as string
       break
     }
     case 'WebSearch': {
-      f.query = String(toolInput['query'] ?? '')
-      if (toolInput['allowed_domains']) f.allowedDomains = String(toolInput['allowed_domains'])
+      light.query = String(toolInput['query'] ?? '')
+      if (toolInput['allowed_domains']) light.allowedDomains = String(toolInput['allowed_domains'])
       break
     }
     case 'ToolSearch': {
-      f.query = String(toolInput['query'] ?? '')
+      light.query = String(toolInput['query'] ?? '')
       break
     }
     case 'AskUserQuestion': {
       if (Array.isArray(toolInput['questions']) && toolInput['questions'].length > 0) {
         const qs = toolInput['questions'] as Array<Record<string, unknown>>
-        f.questionCount = String(qs.length)
-        f.questionsJson = JSON.stringify(qs)
+        light.questionCount = String(qs.length)
+        heavy.questionsJson = JSON.stringify(qs)
       }
       break
     }
     case 'EnterPlanMode':
       break
     case 'ExitPlanMode': {
-      if (typeof toolInput['plan'] === 'string') f.planContent = toolInput['plan'] as string
+      if (typeof toolInput['plan'] === 'string') heavy.planContent = toolInput['plan'] as string
       break
     }
     default: {
       // mcp__* 工具
       if (toolName.startsWith('mcp__')) {
-        f.displayName = toolName.replace(/^mcp__/, '').replace(/__/g, '/')
-        f.description = String(toolInput['description'] ?? '')
+        light.displayName = toolName.replace(/^mcp__/, '').replace(/__/g, '/')
+        light.description = preview(String(toolInput['description'] ?? ''))
       }
       break
     }
   }
 
-  return f
+  // 标记有重内容可展开
+  if (Object.keys(heavy).length > 0) {
+    light.hasHeavyContent = 'true'
+    heavyBadgeStore.set(insertionId, heavy)
+  }
+
+  return { light, heavy }
 }
 
 /**
@@ -335,16 +374,16 @@ export function createToolActivityHandler(store: Store) {
         console.log(`[toolActivityHandler] Skill: name=${skillName} type=${insertion.type} dir=${insertion.direction}`)
       } else {
         // 普通工具 / MCP：右向插入线，携带工具专属字段
-        const extraFields = extractToolBadgeFields(toolName, toolInput)
-        const insertion = buildToolInsertion(toolName, displayText, entryId, claudeId, hookEvent.receivedAt, extraFields)
+        const { light } = extractToolBadgeFields(toolName, toolInput, entryId)
+        const insertion = buildToolInsertion(toolName, displayText, entryId, claudeId, hookEvent.receivedAt, light)
         if (insertion) appendInsertion(store, claudeId, insertion)
-        console.log(`[toolActivityHandler] Tool: name=${toolName} extraFields=${Object.keys(extraFields).join(',')}`)
+        console.log(`[toolActivityHandler] Tool: name=${toolName} extraFields=${Object.keys(light).join(',')}`)
       }
     } else {
       // Subagent 内部工具调用：写到 agent_id 的插入线（右向）
       const agentId = payload.agent_id!
-      const extraFields = extractToolBadgeFields(toolName, toolInput)
-      const insertion = buildToolInsertion(toolName, displayText, entryId, agentId, hookEvent.receivedAt, extraFields)
+      const { light } = extractToolBadgeFields(toolName, toolInput, entryId)
+      const insertion = buildToolInsertion(toolName, displayText, entryId, agentId, hookEvent.receivedAt, light)
       if (insertion) appendSubagentInsertion(store, claudeId, agentId, insertion)
       // 注册 agentId 到父 session（第一次注册时才实际写入）
       registerSubagentId(store, claudeId, agentId)

@@ -67,9 +67,10 @@ describe('history Agent text selection policy', () => {
   })
 
   it('keeps collapsed text as the rendered copy source and expands it in place', () => {
-    expect(processTimelineSource).toContain("lines.slice(0, MAX_USER_LINES).join('\\n')")
-    expect(processTimelineSource).toContain("text.slice(0, MAX_TEXT) + '…'")
-    expect(processTimelineSource).toContain('{isLong && !expanded ? text.slice(0, MAX_TEXT) + \'…\' : text}')
+    // useDetailDisclosure 统一管理 4 行摘要 + 展开/收起
+    expect(processTimelineSource).toContain('useDetailDisclosure')
+    expect(processTimelineSource).toContain('SUMMARY_LINES')
+    expect(processTimelineSource).toContain('summaryText')
     expect(processTimelineSource).not.toContain('navigator.clipboard')
   })
 

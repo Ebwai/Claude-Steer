@@ -103,9 +103,9 @@ describe('HistoryService detail cancellation', () => {
     const before = snapshot('generation-1', [entry('root'), entry('branch', 'root')])
     const after = snapshot('generation-2', [entry('root')])
     mocks.scan.mockResolvedValueOnce(before).mockResolvedValueOnce(after)
-    mocks.loadProjection.mockResolvedValueOnce(projection(['root', 'branch']))
-    let resolveLate: ((value: HistoryClusterProjection) => void) | null = null
-    mocks.loadProjection.mockImplementationOnce(() => new Promise<HistoryClusterProjection>((resolve) => {
+    mocks.loadProjection.mockResolvedValueOnce({ projection: projection(['root', 'branch']), byteRangeByNodeId: new Map() })
+    let resolveLate: ((value: { projection: HistoryClusterProjection; byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number }> }) => void) | null = null
+    mocks.loadProjection.mockImplementationOnce(() => new Promise<{ projection: HistoryClusterProjection; byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number }> }>((resolve) => {
       resolveLate = resolve
     }))
     mocks.deleteTarget.mockResolvedValue({
@@ -135,7 +135,7 @@ describe('HistoryService detail cancellation', () => {
       expectedGeneration: 'generation-1',
       operationId: 'delete-1',
     })
-    resolveLate?.(projection(['root', 'branch']))
+    resolveLate?.({ projection: projection(['root', 'branch']), byteRangeByNodeId: new Map() })
     const lateResult = await detailPromise
 
     expect(deletion).toMatchObject({ ok: true, generation: 'generation-2' })

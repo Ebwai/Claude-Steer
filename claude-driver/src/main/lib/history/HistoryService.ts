@@ -33,6 +33,9 @@ import {
 import { scanHistoryTokenInventory } from './HistoryTokenInventory'
 import { resolveProjectDirectory } from './HistoryPaths'
 
+import type { DetailService } from './DetailService'
+import type { HistoryClusterProjection } from '../../../shared/types/history'
+
 interface RequestState {
   requestId: string
   projectKey: string
@@ -56,7 +59,10 @@ interface DetailRequestState {
   controller: AbortController
 }
 
-export interface HistoryServiceDeps extends HistoryDeletionDeps {}
+export interface HistoryServiceDeps extends HistoryDeletionDeps {
+  /** 可选：注入 DetailService 后，历史投影将自动注册 EntityLocator，支持 Renderer 按需获取全文 */
+  detailService?: DetailService
+}
 
 function projectKey(projectPath: string): string {
   const value = projectPath.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -94,6 +100,52 @@ export class HistoryService {
 
   constructor(private readonly deps: HistoryServiceDeps) {}
 
+  /**
+   * 为投影中所有有文本的节点注册 EntityLocator 并设置 detailRef。
+   * 仅在 detailService 注入时生效。
+   */
+  private _registerProjectionLocators(
+    projection: HistoryClusterProjection,
+    byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number }>,
+    generation: string,
+    claudeDir: string,
+  ): void {
+    if (!this.deps.detailService) return
+    const ds = this.deps.detailService
+    for (const session of projection.sessions) {
+      const filePath = `${claudeDir}/${session.sessionId}.jsonl`
+      for (const node of session.timeline) {
+        if (node.text === undefined) continue
+        const byteRange = byteRangeByNodeId.get(node.id)
+        if (!byteRange) continue
+        const ref = ds.registerEntity(
+          node.id,
+          { filePath, byteStart: byteRange.byteStart, byteEndExclusive: byteRange.byteEndExclusive, encoding: 'utf-8', lineEnding: 'lf' },
+          generation,
+          Buffer.byteLength(node.text, 'utf-8'),
+        )
+        node.detailRef = { detailKey: ref.detailKey, revision: ref.revision, sourceGeneration: ref.sourceGeneration, estimatedSize: ref.estimatedSize }
+        console.info(`[HistoryService] entity registered id=${node.id.slice(0, 12)} byte=[${byteRange.byteStart},${byteRange.byteEndExclusive}) file=${session.sessionId.slice(0, 8)}`)
+      }
+      // Subagent 节点
+      for (const sub of session.subagents) {
+        const subFilePath = `${claudeDir}/${session.sessionId}/subagents/agent-${sub.agentId}.jsonl`
+        for (const node of sub.timeline) {
+          if (node.text === undefined) continue
+          const byteRange = byteRangeByNodeId.get(node.id)
+          if (!byteRange) continue
+          const ref = ds.registerEntity(
+            node.id,
+            { filePath: subFilePath, byteStart: byteRange.byteStart, byteEndExclusive: byteRange.byteEndExclusive, encoding: 'utf-8', lineEnding: 'lf' },
+            generation,
+            Buffer.byteLength(node.text, 'utf-8'),
+          )
+          node.detailRef = { detailKey: ref.detailKey, revision: ref.revision, sourceGeneration: ref.sourceGeneration, estimatedSize: ref.estimatedSize }
+        }
+      }
+    }
+  }
+
   async openProject(input: HistoryOpenInput): Promise<HistoryOpenResult> {
     const key = projectKey(input.projectPath)
     if (this.requests.has(input.requestId) || this.activeControllers.has(input.requestId)) {
@@ -114,7 +166,10 @@ export class HistoryService {
       const snapshot = await scanHistoryCatalog(input.projectId, input.projectPath, controller.signal)
       const latestCluster = snapshot.clusters.at(-1) ?? null
       const latestProjection = latestCluster
-        ? await loadHistoryClusterProjection(snapshot, latestCluster.clusterId, controller.signal)
+        ? await loadHistoryClusterProjection(snapshot, latestCluster.clusterId, controller.signal).then(({ projection, byteRangeByNodeId }) => {
+            this._registerProjectionLocators(projection, byteRangeByNodeId, snapshot.generation, snapshot.claudeDir)
+            return projection
+          })
         : null
       const state: RequestState = {
         requestId: input.requestId,
@@ -204,11 +259,12 @@ export class HistoryService {
       console.info(
         `[HistoryService] hydrate start request=${input.requestId} detail=${input.detailRequestId} generation=${captured.generation} cluster=${input.clusterId.slice(0, 8)}`,
       )
-      const projection = await loadHistoryClusterProjection(
+      const { projection, byteRangeByNodeId } = await loadHistoryClusterProjection(
         captured.snapshot,
         captured.clusterId,
         captured.controller.signal,
       )
+      this._registerProjectionLocators(projection, byteRangeByNodeId, captured.generation, captured.snapshot.claudeDir)
       const currentDetail = this.detailRequests.get(input.detailRequestId)
       const currentProject = this.requests.get(input.requestId)
       if (
@@ -255,7 +311,8 @@ export class HistoryService {
           code: 'HISTORY_NOT_FOUND',
         })
       }
-      const projection = await loadHistoryClusterProjection(snapshot, cluster.clusterId, controller.signal)
+      const { projection, byteRangeByNodeId } = await loadHistoryClusterProjection(snapshot, cluster.clusterId, controller.signal)
+      this._registerProjectionLocators(projection, byteRangeByNodeId, snapshot.generation, snapshot.claudeDir)
       if (controller.signal.aborted) {
         throw Object.assign(new Error('History session seal cancelled'), { code: 'HISTORY_CANCELLED' })
       }

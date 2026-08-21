@@ -77,6 +77,8 @@ interface TimelineProjectionResult {
   timeline: HistoryTimelineNode[]
   visibleIndexByUuid: Map<string, number>
   errors: string[]
+  /** nodeId → JSONL 文件内 byte 范围（供 HistoryService 注册 EntityLocator） */
+  byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number }>
 }
 
 async function readHistoryTimeline(
@@ -87,8 +89,9 @@ async function readHistoryTimeline(
 ): Promise<TimelineProjectionResult> {
   const timeline: HistoryTimelineNode[] = []
   const visibleIndexByUuid = new Map<string, number>()
+  const byteRangeByNodeId = new Map<string, { byteStart: number; byteEndExclusive: number }>()
   const errors: string[] = []
-  const stream = fs.createReadStream(filePath, { encoding: 'utf8' })
+  const stream = fs.createReadStream(filePath)
   const reader = readline.createInterface({ input: stream, crlfDelay: Infinity })
   let pendingSnapshotStart = false
   let sawHistorySnapshot = false
@@ -97,19 +100,53 @@ async function readHistoryTimeline(
   let visibleNodeCount = 0
   let lineNumber = 0
 
+  // 字节追踪：基于 readline 行内容计算，不用 stream.on('data')（readline 和 data 事件时序不同步）
+  // 初始偏移：检测 UTF-8 BOM（readline 会剥离 BOM，但字节仍占据位置）
+  let currentByteOffset = 0
+  let bomChecked = false
+
   try {
     for await (const line of reader) {
       lineNumber++
       throwIfAborted(signal)
-      if (!line.trim()) continue
+
+      // 首行检测 BOM：如果文件以 UTF-8 BOM 开头，readline 剥离后 line 不含 BOM，
+      // 但 BOM 的 3 字节占据文件位置
+      if (!bomChecked) {
+        bomChecked = true
+        try {
+          const head = Buffer.alloc(3)
+          const fd = fs.openSync(filePath, 'r')
+          fs.readSync(fd, head, 0, 3, 0)
+          fs.closeSync(fd)
+          if (head[0] === 0xEF && head[1] === 0xBB && head[2] === 0xBF) {
+            currentByteOffset = 3
+          }
+        } catch { /* 忽略 BOM 检测失败 */ }
+      }
+
+      if (!line.trim()) {
+        // 空行：推进字节偏移（1 for LF, 2 for CRLF — crlfDelay 合并为 LF）
+        currentByteOffset += 1
+        continue
+      }
+
+      // 基于行内容计算字节范围（readline 剥离行尾，JSONL 用 LF）
+      const lineBytes = Buffer.byteLength(line, 'utf-8')
+      const byteStart = currentByteOffset
+      const byteEndExclusive = byteStart + lineBytes + 1 // +1 for LF
 
       let raw: Record<string, unknown>
       try {
         const parsed = JSON.parse(line) as unknown
-        if (typeof parsed !== 'object' || parsed === null) continue
+        if (typeof parsed !== 'object' || parsed === null) {
+          currentByteOffset = byteEndExclusive
+          continue
+        }
         raw = parsed as Record<string, unknown>
       } catch {
         errors.push(`line ${lineNumber}: malformed JSON`)
+        currentByteOffset = byteEndExclusive
         continue
       }
 
@@ -150,10 +187,15 @@ async function readHistoryTimeline(
           ) {
             fallbackCandidateIndex = timeline.length
           }
+          // 记录有文本的节点字节范围（user_input/assistant/tool_result）
+          if (node.text !== undefined) {
+            byteRangeByNodeId.set(node.id, { byteStart, byteEndExclusive })
+          }
           timeline.push(node)
           if (node.type === 'user_input' || node.type === 'assistant') visibleNodeCount++
         }
       }
+      currentByteOffset = byteEndExclusive
       pendingSnapshotStart ||= isSnapshot
     }
 
@@ -170,7 +212,7 @@ async function readHistoryTimeline(
     reader.close()
     stream.destroy()
   }
-  return { timeline, visibleIndexByUuid, errors }
+  return { timeline, visibleIndexByUuid, errors, byteRangeByNodeId }
 }
 
 async function readJsonLines<T>(
@@ -280,7 +322,7 @@ export async function loadHistoryClusterProjection(
   snapshot: HistoryCatalogSnapshot,
   clusterId: string,
   signal?: AbortSignal
-): Promise<HistoryClusterProjection> {
+): Promise<{ projection: HistoryClusterProjection; byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number }> }> {
   const cluster = snapshot.clusters.find((item) => item.clusterId === clusterId)
   if (!cluster) {
     throw Object.assign(new Error(`History cluster not found: ${clusterId}`), {
@@ -290,6 +332,7 @@ export async function loadHistoryClusterProjection(
 
   const projections: HistorySessionProjection[] = []
   const visibleIndexesBySession = new Map<string, Map<string, number>>()
+  const allByteRanges = new Map<string, { byteStart: number; byteEndExclusive: number }>()
   for (const entry of cluster.sessions) {
     throwIfAborted(signal)
     const transcriptPath = path.join(snapshot.claudeDir, `${entry.sessionId}.jsonl`)
@@ -319,6 +362,10 @@ export async function loadHistoryClusterProjection(
     for (const node of transcript.timeline) {
       const attached = resourcesByUuid.get(node.id)
       if (attached?.length) node.resources = attached
+    }
+    // 合并主时间线字节范围
+    for (const [nodeId, range] of transcript.byteRangeByNodeId) {
+      allByteRanges.set(nodeId, range)
     }
     visibleIndexesBySession.set(entry.sessionId, transcript.visibleIndexByUuid)
     projections.push({
@@ -385,5 +432,5 @@ export async function loadHistoryClusterProjection(
   console.info(
     `[HistoryProjection] cluster=${clusterId.slice(0, 8)} sessions=${projections.length} nodes=${nodeCount} partialErrors=${partialCount} estimatedBytes=${estimatedBytes}`
   )
-  return projection
+  return { projection, byteRangeByNodeId: allByteRanges }
 }

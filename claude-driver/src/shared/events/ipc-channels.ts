@@ -118,6 +118,16 @@ export const IPC = {
   HISTORY_DELETE: 'history:delete',
   /** 独立扫描 Token 统计库存，不创建历史工作框 */
   HISTORY_TOKEN_INVENTORY: 'history:token-inventory',
+  /** Renderer → Main：请求单条实体 L2 详情（detailKey + revision，Main 验证后按 byte range 读取） */
+  DETAIL_REQUEST: 'detail:request',
+  /** Main → Renderer：详情响应（完整或分块最后一块，status: ready/error/invalidated） */
+  DETAIL_RESPONSE: 'detail:response',
+  /** Main → Renderer：分块详情中间块（超大详情时使用） */
+  DETAIL_CHUNK: 'detail:chunk',
+  /** Main → Renderer：详情失效通知（source generation 变更时发送） */
+  DETAIL_INVALIDATED: 'detail:invalidated',
+  /** Renderer → Main：取消进行中的详情请求（释放 Main 端 in-flight 资源） */
+  DETAIL_CANCEL: 'detail:cancel',
   /** 获取 main/history/watcher 与 Electron 各进程的资源计数快照 */
   RUNTIME_RESOURCE_SNAPSHOT: 'runtime:resource-snapshot',
   /** 追加一条完整插入线到 <claudeId>.insertions.jsonl */

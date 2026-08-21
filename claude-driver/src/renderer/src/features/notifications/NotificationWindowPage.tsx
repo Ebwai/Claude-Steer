@@ -17,6 +17,7 @@ import { IPC } from '@shared/events/ipc-channels'
 import type { SessionStatus } from '@shared/types/index'
 import { useT } from '../../i18n'
 import { pathMatches } from '../../utils/pathUtils'
+import { useDetailDisclosure } from '../../hooks/useDetailDisclosure'
 import './NotificationWindowPage.css'
 
 // ── 辅助：将 toolInput 转为可读详情文本 ─────────────────────────
@@ -70,10 +71,17 @@ interface NotificationItemProps {
 function NotificationItem({ req }: NotificationItemProps): React.JSX.Element {
   const { t } = useT()
   const store = useStore()
-  const [expanded, setExpanded] = useState(false)
   const [showInput, setShowInput] = useState(false)
   const [message, setMessage] = useState('')
   const [pending, setPending] = useState<'approve' | 'deny' | null>(null)
+
+  // 统一 disclosure hook（Notification 不截断文本，仅管理展开/收起状态与 lease）
+  const detailText = buildDetailText(req.toolName, req.toolInput as Record<string, unknown>)
+  const { expanded, toggle } = useDetailDisclosure({
+    detailId: req.requestId,
+    fullText: detailText,
+    summaryLines: 0, // Notification 不截断文本，只控制展开/收起
+  })
 
   const handleDecide = useCallback(async (approved: boolean) => {
     setPending(approved ? 'approve' : 'deny')
@@ -102,7 +110,6 @@ function NotificationItem({ req }: NotificationItemProps): React.JSX.Element {
     }
   }, [req.requestId, store])
 
-  const detailText = buildDetailText(req.toolName, req.toolInput as Record<string, unknown>)
   const hasDetail = !!detailText
   const toolColor = getToolColor(req.toolName)
 
@@ -115,7 +122,7 @@ function NotificationItem({ req }: NotificationItemProps): React.JSX.Element {
         {hasDetail && (
           <button
             className="nw-item-expand"
-            onClick={() => setExpanded(!expanded)}
+            onClick={toggle}
             style={{ color: toolColor }}
           >
             {expanded ? '▲' : '▼'}

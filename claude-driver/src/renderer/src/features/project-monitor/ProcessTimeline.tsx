@@ -24,6 +24,7 @@ import SubagentBlock from './SubagentBlock'
 import AssignAgentPanel from './AssignAgentPanel'
 import ResourceAttachments from './ResourceAttachments'
 import { useT } from '../../i18n'
+import { useDetailDisclosure, SUMMARY_LINES } from '../../hooks/useDetailDisclosure'
 import './ProcessTimeline.css'
 
 interface ProcessTimelineProps {
@@ -353,17 +354,23 @@ interface NodeProps {
 
 function TimelineNodeItem({ node, toolResults, onUserInputRef, isLastNode, sessionId, projectPath, isCursor }: NodeProps): React.JSX.Element {
   const { t } = useT()
-  const [expanded, setExpanded] = useState(false)
-  const MAX_TEXT = 400
-  const MAX_USER_LINES = 10
   const cursorClass = isCursor ? ' ptl-node--cursor' : ''
 
+  // user_input 和 assistant 统一 disclosure hook
+  const fullText = node.type === 'user_input'
+    ? (node.text ?? '')
+    : node.type === 'assistant'
+      ? stripInsightBlock(node.text ?? '')
+      : ''
+  const { expanded, toggle, summaryText, displayText, hasMore } = useDetailDisclosure({
+    detailId: node.id,
+    fullText,
+    summaryLines: SUMMARY_LINES,
+    detailRef: node.detailRef ?? undefined,
+    textTruncated: node.textTruncated,
+  })
+
   if (node.type === 'user_input') {
-    const lines = (node.text ?? '').split('\n')
-    const isUserLong = lines.length > MAX_USER_LINES
-    const displayText = isUserLong && !expanded
-      ? lines.slice(0, MAX_USER_LINES).join('\n') + '\n…'
-      : (node.text ?? '')
     return (
       <div
         className={`ptl-node ptl-node-user${cursorClass}`}
@@ -377,11 +384,15 @@ function TimelineNodeItem({ node, toolResults, onUserInputRef, isLastNode, sessi
             {/* 删除功能预留：功能即将上线，暂不可交互 */}
             <span className="ptl-delete-placeholder" title={t('projectMonitor.timeline.deleteComingSoon')}>🗑</span>
           </div>
-          <span className="ptl-user-text">{displayText}</span>
+          <span className="ptl-user-text">{expanded ? displayText : summaryText}</span>
           {!!node.resources?.length && projectPath && <ResourceAttachments resources={node.resources} projectPath={projectPath} />}
-          {isUserLong && (
-            <button className="ptl-expand-btn" onClick={() => setExpanded((v) => !v)}>
-              {expanded ? t('projectMonitor.timeline.collapse') : t('projectMonitor.timeline.expandFull', { lines: lines.length })}
+          {hasMore && (
+            <button className="ptl-expand-btn" onClick={toggle}>
+              {expanded
+                ? t('projectMonitor.timeline.collapse')
+                : node.detailRef
+                  ? t('projectMonitor.timeline.expandFullText')
+                  : t('projectMonitor.timeline.expandFull', { lines: fullText.split('\n').length })}
             </button>
           )}
         </div>
@@ -390,18 +401,16 @@ function TimelineNodeItem({ node, toolResults, onUserInputRef, isLastNode, sessi
   }
 
   if (node.type === 'assistant') {
-    const text = stripInsightBlock(node.text ?? '')
-    if (!text) return <></>
-    const isLong = text.length > MAX_TEXT
+    if (!fullText) return <></>
     return (
       <div className={`ptl-node ptl-node-assistant${cursorClass}`} data-nodeid={node.id}>
         <span className={`ptl-dot ptl-dot-assistant${node.isGitted ? ' ptl-dot-gitted' : ''}`} />
         <div className="ptl-assistant-card">
           <div className="ptl-assistant-text ptl-paint-body">
-            {isLong && !expanded ? text.slice(0, MAX_TEXT) + '…' : text}
+            {expanded ? displayText : summaryText}
           </div>
-          {isLong && (
-            <button className="ptl-expand-btn" onClick={() => setExpanded((v) => !v)}>
+          {hasMore && (
+            <button className="ptl-expand-btn" onClick={toggle}>
               {expanded ? t('projectMonitor.timeline.collapse') : t('projectMonitor.timeline.expandFullText')}
             </button>
           )}

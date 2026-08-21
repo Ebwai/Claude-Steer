@@ -11,6 +11,7 @@
 import React, { useState } from 'react'
 import type { LineInsertion } from '@shared/types/lineInsertion'
 import { useT, type TFunction } from '../../i18n'
+import { getHeavyBadgeContent } from '../../business/toolActivityHandler'
 import './LineInsertionItem.css'
 
 interface LineInsertionItemProps {
@@ -131,16 +132,16 @@ function buildToolCompact(toolName: string, bc: Record<string, string>, t: TFunc
 function hasToolDetail(toolName: string, bc: Record<string, string>): boolean {
   switch (toolName) {
     case 'Read': return !!(bc['filePath'] || bc['rangeLabel'])
-    case 'Write': return !!(bc['filePath'] || bc['contentFull'])
-    case 'Edit': return !!(bc['filePath'] || bc['oldFull'] || bc['newFull'])
-    case 'MultiEdit': return !!(bc['filePath'] || bc['editsJson'])
+    case 'Write': return !!(bc['filePath'] || bc['hasHeavyContent'])
+    case 'Edit': return !!(bc['filePath'] || bc['hasHeavyContent'])
+    case 'MultiEdit': return !!(bc['filePath'] || bc['hasHeavyContent'])
     case 'Bash': return !!(bc['command'] || bc['description'])
     case 'Grep': return !!(bc['pattern'] || bc['searchPath'])
     case 'Glob': return !!bc['pattern']
-    case 'WebFetch': return !!(bc['url'] || bc['prompt'])
+    case 'WebFetch': return !!(bc['url'] || bc['hasHeavyContent'])
     case 'WebSearch': return !!(bc['query'] || bc['resultsJson'])
     case 'ToolSearch': return !!(bc['query'] || bc['toolsFound'])
-    case 'AskUserQuestion': return !!(bc['questionsJson'] || bc['selectedAnswer'])
+    case 'AskUserQuestion': return !!(bc['hasHeavyContent'] || bc['selectedAnswer'])
     default: return !!bc['displayName']
   }
 }
@@ -149,7 +150,10 @@ function hasToolDetail(toolName: string, bc: Record<string, string>): boolean {
 // 工具 badge 展开态详情渲染
 // ════════════════════════════════════════════════════════════════
 
-function renderToolDetail(toolName: string, bc: Record<string, string>, t: TFunction): React.ReactNode {
+function renderToolDetail(toolName: string, bc: Record<string, string>, t: TFunction, insertionId?: string): React.ReactNode {
+  // 重内容从模块级 heavyBadgeStore 按需读取（不驻留 timeline atom）
+  const heavy = insertionId ? getHeavyBadgeContent(insertionId) : undefined
+
   switch (toolName) {
     case 'Read':
       return (
@@ -165,8 +169,8 @@ function renderToolDetail(toolName: string, bc: Record<string, string>, t: TFunc
       return (
         <>
           {bc['filePath'] && <div className="ins-badge-tool-path">{bc['filePath']}</div>}
-          {bc['contentFull'] && (
-            <div className="ins-badge-tool-code">{bc['contentFull']}</div>
+          {heavy?.contentFull && (
+            <div className="ins-badge-tool-code">{heavy.contentFull}</div>
           )}
         </>
       )
@@ -175,8 +179,8 @@ function renderToolDetail(toolName: string, bc: Record<string, string>, t: TFunc
       return (
         <>
           {bc['filePath'] && <div className="ins-badge-tool-path">{bc['filePath']}</div>}
-          {bc['oldFull'] && <div className="ins-badge-tool-old">− {bc['oldFull']}</div>}
-          {bc['newFull'] && <div className="ins-badge-tool-new">+ {bc['newFull']}</div>}
+          {heavy?.oldFull && <div className="ins-badge-tool-old">− {heavy.oldFull}</div>}
+          {heavy?.newFull && <div className="ins-badge-tool-new">+ {heavy.newFull}</div>}
           {bc['replaceAll'] === 'true' && <span className="ins-badge-tool-tag">{t('projectMonitor.lineInsertion.replaceAll')}</span>}
         </>
       )
@@ -186,9 +190,9 @@ function renderToolDetail(toolName: string, bc: Record<string, string>, t: TFunc
         <>
           {bc['filePath'] && <div className="ins-badge-tool-path">{bc['filePath']}</div>}
           {bc['editCount'] && <div className="ins-badge-tool-detail">{t('projectMonitor.lineInsertion.editsCount', { count: parseInt(bc['editCount'], 10) || 0 })}</div>}
-          {bc['editsJson'] && (() => {
+          {heavy?.editsJson && (() => {
             try {
-              const edits = JSON.parse(bc['editsJson']) as Array<{ old_string: string; new_string: string }>
+              const edits = JSON.parse(heavy.editsJson) as Array<{ old_string: string; new_string: string }>
               return edits.map((e, i) => (
                 <div key={i} className="ins-badge-tool-code">
                   <div className="ins-badge-tool-old">− {safeChild(e.old_string)}</div>
@@ -230,7 +234,7 @@ function renderToolDetail(toolName: string, bc: Record<string, string>, t: TFunc
       return (
         <>
           {bc['url'] && <div className="ins-badge-tool-path">{bc['url']}</div>}
-          {bc['prompt'] && <div className="ins-badge-tool-detail">prompt: {bc['prompt']}</div>}
+          {heavy?.prompt && <div className="ins-badge-tool-detail">prompt: {heavy.prompt}</div>}
         </>
       )
 
@@ -274,7 +278,7 @@ function renderToolDetail(toolName: string, bc: Record<string, string>, t: TFunc
       return (
         <>
           <div className="ins-badge-tool-detail">{t('projectMonitor.lineInsertion.exitPlanMode')}</div>
-          {bc['planContent'] && <div className="ins-badge-tool-code">{bc['planContent']}</div>}
+          {heavy?.planContent && <div className="ins-badge-tool-code">{heavy.planContent}</div>}
         </>
       )
 
@@ -430,7 +434,8 @@ function LineInsertionItem({ insertion }: LineInsertionItemProps): React.JSX.Ele
   // ── AskUserQuestion badge ──
   const buildAskUserQuestionBadge = (): React.ReactNode => {
     const hasAnswer = !!badgeContent['selectedAnswer']
-    const hasQuestions = !!badgeContent['questionsJson']
+    const heavyQ = getHeavyBadgeContent(insertion.id)
+    const hasQuestions = !!heavyQ?.questionsJson
 
     // 紧凑态：固定文字
     if (!isExpanded) {
@@ -472,9 +477,9 @@ function LineInsertionItem({ insertion }: LineInsertionItemProps): React.JSX.Ele
           {isAnimating && !hasAnswer && <span className="ins-spinner" style={{ color }}>⟳</span>}
         </div>
 
-        {hasQuestions && (() => {
+        {hasQuestions && heavyQ?.questionsJson && (() => {
           try {
-            const questions = JSON.parse(badgeContent['questionsJson']) as Array<{
+            const questions = JSON.parse(heavyQ.questionsJson) as Array<{
               question: string; header?: string; options?: Array<{ label: string; description?: string }>;
               multiSelect?: boolean
             }>
@@ -504,7 +509,7 @@ function LineInsertionItem({ insertion }: LineInsertionItemProps): React.JSX.Ele
             ))
           } catch (err) {
             console.error('[LineInsertion] AskUserQuestion expand ERROR:', err)
-            console.error('[LineInsertion] AskUserQuestion — questionsJson preview:', badgeContent['questionsJson']?.substring(0, 200))
+            console.error('[LineInsertion] AskUserQuestion — questionsJson preview:', heavyQ?.questionsJson?.substring(0, 200))
             return null
           }
         })()}
@@ -550,7 +555,7 @@ function LineInsertionItem({ insertion }: LineInsertionItemProps): React.JSX.Ele
     // 展开态
     const detailContent = (() => {
       try {
-        return renderToolDetail(actualToolName, badgeContent, t)
+        return renderToolDetail(actualToolName, badgeContent, t, insertion.id)
       } catch (err) {
         console.error('[LineInsertion] renderToolDetail CRASHED for tool:', actualToolName, 'error:', err)
         return <div className="ins-badge-tool-detail" style={{ color: 'var(--rd)' }}>{t('projectMonitor.lineInsertion.renderDetailFailed', { error: String(err) })}</div>

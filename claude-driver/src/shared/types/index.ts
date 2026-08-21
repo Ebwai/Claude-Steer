@@ -435,4 +435,5 @@ export interface ProviderEnvBlock {
 
 // 历史工作区跨进程契约（放在末尾避免打断既有领域类型编号）
 export * from './history'
+export * from './detail'
 export * from './resources'
