@@ -7,7 +7,9 @@ import type {
   EntityLocator,
   DetailRequest,
   DetailResponse,
-  DetailChunk
+  DetailChunk,
+  McpRequestDetail,
+  McpResponseDetail
 } from '../../../shared/types/detail'
 import { IPC } from '../../../shared/events/ipc-channels'
 import { parseJsonlLine } from '../jsonl/JsonlParser'
@@ -24,8 +26,58 @@ interface TransientEntry {
   data: string
   createdAt: number
   sessionId: string
+  sourceGeneration: string
   /** TTL in ms */
   ttlMs: number
+}
+
+
+function shortId(value: string): string {
+  return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
+}
+
+function safeSerialize(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === null) return 'null'
+  if (value === undefined) return 'undefined'
+  try {
+    const seen = new WeakSet<object>()
+    const serialized = JSON.stringify(value, (_key, current: unknown) => {
+      if (typeof current !== 'object' || current === null) return current
+      if (seen.has(current)) return '[Circular]'
+      seen.add(current)
+      return current
+    }, 2)
+    return serialized ?? String(value)
+  } catch (err) {
+    return `[Unserializable: ${err instanceof Error ? err.message : String(err)}]`
+  }
+}
+
+function serializeMcpDetail(detail: McpRequestDetail | McpResponseDetail): string {
+  return safeSerialize(detail)
+}
+
+function extractDetailData(record: ReturnType<typeof parseJsonlLine>, rawData: string): string {
+  if (!record) return rawData
+  if (record.type === 'tool_use' && record.toolUse?.name.startsWith('mcp__')) {
+    return serializeMcpDetail({
+      kind: 'mcp-request',
+      toolUseId: record.toolUse.id,
+      toolName: record.toolUse.name,
+      input: record.toolUse.input,
+    })
+  }
+  if (record.type === 'tool_result' && record.toolResult) {
+    return serializeMcpDetail({
+      kind: 'mcp-response',
+      toolUseId: record.toolResult.tool_use_id,
+      content: record.toolResult.content,
+      isError: record.toolResult.is_error ?? false,
+      errorMessage: record.toolResult.is_error ? safeSerialize(record.toolResult.content) : undefined,
+    })
+  }
+  return record.text ?? rawData
 }
 
 export interface DetailServiceDeps {
@@ -51,14 +103,13 @@ export function createDetailService(deps: DetailServiceDeps) {
 
   /** detailKey → TransientEntry（Permission 等瞬态详情） */
   const transientDetailRegistry = new Map<string, TransientEntry>()
+  const MAX_TRANSIENT_DETAILS = 4096
 
   /** detailKey → AbortController（进行中的详情请求，支持 DETAIL_CANCEL） */
   const activeRequests = new Map<string, AbortController>()
 
   /** 当前 generation（locator 失效时递增） */
   let currentGeneration = 'gen-0'
-
-  // ── 注册/注销 ────────────────────────────────────────────────────────────
 
   function registerEntity(
     entityId: string,
@@ -69,19 +120,11 @@ export function createDetailService(deps: DetailServiceDeps) {
     const detailKey = entityId
     entityLocatorIndex.set(entityId, { locator, sourceGeneration, estimatedSize })
     detailKeyToEntity.set(detailKey, entityId)
-
-    const revision = Date.now()
-    return {
-      detailKey,
-      revision,
-      sourceGeneration,
-      estimatedSize
-    }
+    return { detailKey, revision: Date.now(), sourceGeneration, estimatedSize }
   }
 
   function unregisterEntity(entityId: string): void {
     entityLocatorIndex.delete(entityId)
-    // 清理反向映射
     for (const [key, eid] of detailKeyToEntity) {
       if (eid === entityId) {
         detailKeyToEntity.delete(key)
@@ -91,7 +134,42 @@ export function createDetailService(deps: DetailServiceDeps) {
   }
 
   function registerTransient(detailKey: string, data: string, sessionId: string, ttlMs = 30_000): void {
-    transientDetailRegistry.set(detailKey, { data, createdAt: Date.now(), sessionId, ttlMs })
+    transientDetailRegistry.set(detailKey, {
+      data,
+      createdAt: Date.now(),
+      sessionId,
+      sourceGeneration: currentGeneration,
+      ttlMs,
+    })
+    while (transientDetailRegistry.size > MAX_TRANSIENT_DETAILS) {
+      const oldestKey = transientDetailRegistry.keys().next().value as string | undefined
+      if (!oldestKey) break
+      transientDetailRegistry.delete(oldestKey)
+      logger.warn('[DetailService] transient detail evicted by capacity', { detailKey: shortId(oldestKey) })
+    }
+  }
+
+  function registerMcpTransient(
+    detailKey: string,
+    detail: McpRequestDetail | McpResponseDetail,
+    sessionId: string,
+    // MCP 详情在 Agent 运行期间可能直到工具完成后才被展开，不能沿用
+    // Permission 等普通瞬态详情的 30 秒短 TTL；生命周期由 generation、
+    // SessionEnd 清理和容量上限共同控制。调用方仍可显式传入 TTL 做测试或特殊限制。
+    ttlMs = Number.POSITIVE_INFINITY,
+  ): DetailRef {
+    const data = serializeMcpDetail(detail)
+    registerTransient(detailKey, data, sessionId, ttlMs)
+    const ref = {
+      detailKey,
+      revision: Date.now(),
+      sourceGeneration: currentGeneration,
+      estimatedSize: Buffer.byteLength(data, 'utf-8'),
+    }
+    logger.info('[DetailService] MCP transient registered', {
+      detailKey: shortId(detail.toolUseId), kind: detail.kind, sessionId: shortId(sessionId), bytes: ref.estimatedSize,
+    })
+    return ref
   }
 
   function unregisterTransient(detailKey: string): void {
@@ -100,282 +178,173 @@ export function createDetailService(deps: DetailServiceDeps) {
 
   function unregisterTransientBySession(sessionId: string): void {
     for (const [key, entry] of transientDetailRegistry) {
-      if (entry.sessionId === sessionId) {
-        transientDetailRegistry.delete(key)
-      }
+      if (entry.sessionId === sessionId) transientDetailRegistry.delete(key)
     }
   }
 
-  // ── Generation ───────────────────────────────────────────────────────────
-
   function invalidateGeneration(): string {
     currentGeneration = `gen-${Date.now()}`
+    for (const [key, entry] of transientDetailRegistry) {
+      if (entry.sourceGeneration !== currentGeneration) transientDetailRegistry.delete(key)
+    }
     logger.info('[DetailService] generation invalidated', { newGeneration: currentGeneration })
     return currentGeneration
   }
 
-  function getCurrentGeneration(): string {
-    return currentGeneration
-  }
+  function getCurrentGeneration(): string { return currentGeneration }
 
-  // ── 请求处理 ─────────────────────────────────────────────────────────────
-
-  async function handleDetailRequest(
-    request: DetailRequest,
-    abortSignal?: AbortSignal
-  ): Promise<DetailResponse> {
-    const { detailKey } = request
-
-    // 创建 AbortController，合并外部 signal 与 cancelByDetailKey 触发
+  async function handleDetailRequest(request: DetailRequest, abortSignal?: AbortSignal): Promise<DetailResponse> {
     const controller = new AbortController()
-    const mergedSignal = controller.signal
-    activeRequests.set(detailKey, controller)
-
-    // 外部 signal abort 时同步到 controller
+    activeRequests.set(request.detailKey, controller)
     if (abortSignal) {
-      if (abortSignal.aborted) {
-        controller.abort()
-      } else {
-        abortSignal.addEventListener('abort', () => controller.abort(), { once: true })
-      }
+      if (abortSignal.aborted) controller.abort()
+      else abortSignal.addEventListener('abort', () => controller.abort(), { once: true })
     }
-
     try {
-      return await handleDetailRequestInner(request, mergedSignal)
+      return await handleDetailRequestInner(request, controller.signal)
     } finally {
-      activeRequests.delete(detailKey)
+      activeRequests.delete(request.detailKey)
     }
   }
 
-  async function handleDetailRequestInner(
-    request: DetailRequest,
-    abortSignal: AbortSignal
-  ): Promise<DetailResponse> {
+  async function handleDetailRequestInner(request: DetailRequest, abortSignal: AbortSignal): Promise<DetailResponse> {
     const { detailKey, revision, sourceGeneration } = request
-
-    // 1. 检查瞬态详情
     const transient = transientDetailRegistry.get(detailKey)
     if (transient) {
-      // 检查 TTL
+      if (transient.sourceGeneration !== sourceGeneration) {
+        logger.info('[DetailService] transient detail generation mismatch', {
+          detailKey: shortId(detailKey),
+          expected: transient.sourceGeneration,
+          received: sourceGeneration,
+        })
+        return { detailKey, revision, status: 'invalidated' }
+      }
       if (Date.now() - transient.createdAt > transient.ttlMs) {
         transientDetailRegistry.delete(detailKey)
-        logger.info('[DetailService] transient detail expired', { detailKey })
+        logger.info('[DetailService] transient detail expired', { detailKey: shortId(detailKey) })
         return { detailKey, revision, status: 'error', error: 'Transient detail expired' }
       }
+      logger.info('[DetailService] MCP transient detail hit', { detailKey: shortId(detailKey), sessionId: shortId(transient.sessionId) })
       return { detailKey, revision, status: 'ready', data: transient.data }
     }
 
-    // 2. 查找 entity locator
     const entityId = detailKeyToEntity.get(detailKey)
     if (!entityId) {
-      logger.warn('[DetailService] detailKey not found', { detailKey })
+      logger.warn('[DetailService] detailKey not found', { detailKey: shortId(detailKey) })
       return { detailKey, revision, status: 'error', error: 'Entity not found' }
     }
-
     const entry = entityLocatorIndex.get(entityId)
     if (!entry) {
-      logger.warn('[DetailService] entity locator not found', { entityId, detailKey })
+      logger.warn('[DetailService] entity locator not found', { entityId: shortId(entityId), detailKey: shortId(detailKey) })
       return { detailKey, revision, status: 'error', error: 'Entity locator not found' }
     }
-
-    // 3. 验证 source generation
     if (entry.sourceGeneration !== sourceGeneration) {
-      logger.info('[DetailService] source generation mismatch, invalidating', {
-        detailKey,
-        expected: entry.sourceGeneration,
-        received: sourceGeneration
-      })
+      logger.info('[DetailService] source generation mismatch, invalidating', { detailKey: shortId(detailKey), expected: entry.sourceGeneration, received: sourceGeneration })
       return { detailKey, revision, status: 'invalidated' }
     }
+    if (abortSignal.aborted) return { detailKey, revision, status: 'error', error: 'Request aborted' }
 
-    // 4. 检查 abort
-    if (abortSignal?.aborted) {
-      return { detailKey, revision, status: 'error', error: 'Request aborted' }
-    }
-
-    // 5. 按 byte range 读取
     const { locator } = entry
     const length = locator.byteEndExclusive - locator.byteStart
-
     try {
-      if (abortSignal?.aborted) {
-        return { detailKey, revision, status: 'error', error: 'Request aborted' }
-      }
-
       const buffer = await readFile(locator.filePath, locator.byteStart, length)
-
-      if (abortSignal?.aborted) {
-        return { detailKey, revision, status: 'error', error: 'Request aborted' }
-      }
-
+      if (abortSignal.aborted) return { detailKey, revision, status: 'error', error: 'Request aborted' }
       const rawData = buffer.toString(locator.encoding || 'utf-8')
-
-      // 从 JSONL 行提取纯消息文本（剥离 parentUuid/sessionId/timestamp 等元数据）
-      const record = parseJsonlLine(rawData)
-      const data = record?.text ?? rawData
-
+      const data = extractDetailData(parseJsonlLine(rawData), rawData)
       logger.info('[DetailService] detail read success', {
-        detailKey,
-        entityId,
-        filePath: locator.filePath,
-        byteStart: locator.byteStart,
-        byteEnd: locator.byteStart + length,
-        bytes: length,
-        preview: data.slice(0, 80)
+        detailKey: shortId(detailKey), entityId: shortId(entityId), filePath: locator.filePath,
+        byteStart: locator.byteStart, byteEnd: locator.byteStart + length, bytes: length, preview: data.slice(0, 80),
       })
-
       return { detailKey, revision, status: 'ready', data }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
-      logger.error('[DetailService] detail read failed', {
-        detailKey,
-        entityId,
-        filePath: locator.filePath,
-        error: errorMsg
-      })
+      logger.error('[DetailService] detail read failed', { detailKey: shortId(detailKey), entityId: shortId(entityId), filePath: locator.filePath, error: errorMsg })
       return { detailKey, revision, status: 'error', error: errorMsg }
     }
   }
 
-  // ── 大详情分块响应（预留） ───────────────────────────────────────────────
-
-  async function handleDetailRequestChunked(
-    request: DetailRequest,
-    abortSignal?: AbortSignal,
-    chunkSize = 64 * 1024
-  ): Promise<void> {
+  async function handleDetailRequestChunked(request: DetailRequest, abortSignal?: AbortSignal, chunkSize = 64 * 1024): Promise<void> {
     const { detailKey, revision, sourceGeneration } = request
-
     const entityId = detailKeyToEntity.get(detailKey)
     if (!entityId) {
       sendToRenderer(IPC.DETAIL_RESPONSE, { detailKey, revision, status: 'error', error: 'Entity not found' } as DetailResponse)
       return
     }
-
     const entry = entityLocatorIndex.get(entityId)
     if (!entry || entry.sourceGeneration !== sourceGeneration) {
       sendToRenderer(IPC.DETAIL_RESPONSE, { detailKey, revision, status: 'invalidated' } as DetailResponse)
       return
     }
-
     const { locator } = entry
     const totalBytes = locator.byteEndExclusive - locator.byteStart
     let offset = locator.byteStart
-
     try {
       while (offset < locator.byteEndExclusive) {
         if (abortSignal?.aborted) {
           sendToRenderer(IPC.DETAIL_RESPONSE, { detailKey, revision, status: 'error', error: 'Request aborted' } as DetailResponse)
           return
         }
-
-        const remaining = locator.byteEndExclusive - offset
-        const readLen = Math.min(chunkSize, remaining)
+        const readLen = Math.min(chunkSize, locator.byteEndExclusive - offset)
         const buffer = await readFile(locator.filePath, offset, readLen)
         const chunk = buffer.toString('utf-8')
         const bytesSent = offset - locator.byteStart + readLen
-
         if (bytesSent < totalBytes) {
-          sendToRenderer(IPC.DETAIL_CHUNK, {
-            detailKey,
-            revision,
-            chunk,
-            bytesSent,
-            totalBytes
-          } as DetailChunk)
+          sendToRenderer(IPC.DETAIL_CHUNK, { detailKey, revision, chunk, bytesSent, totalBytes } as DetailChunk)
         } else {
-          // 最后一块用 DETAIL_RESPONSE
-          sendToRenderer(IPC.DETAIL_RESPONSE, {
-            detailKey,
-            revision,
-            status: 'ready',
-            data: chunk
-          } as DetailResponse)
+          sendToRenderer(IPC.DETAIL_RESPONSE, { detailKey, revision, status: 'ready', data: chunk } as DetailResponse)
         }
-
         offset += readLen
       }
     } catch (err) {
-      sendToRenderer(IPC.DETAIL_RESPONSE, {
-        detailKey,
-        revision,
-        status: 'error',
-        error: err instanceof Error ? err.message : String(err)
-      } as DetailResponse)
+      sendToRenderer(IPC.DETAIL_RESPONSE, { detailKey, revision, status: 'error', error: err instanceof Error ? err.message : String(err) } as DetailResponse)
     }
   }
-
-  // ── 会话级清理 ───────────────────────────────────────────────────────────
 
   function cleanupBySession(sessionId: string): void {
     unregisterTransientBySession(sessionId)
-    // entity locator 由 history projection 生命周期管理，此处不清理
   }
 
-  // ── 状态查询 ─────────────────────────────────────────────────────────────
-
-  function getResourceSnapshot(): {
-    registeredEntities: number
-    transientDetails: number
-    currentGeneration: string
-  } {
-    return {
-      registeredEntities: entityLocatorIndex.size,
-      transientDetails: transientDetailRegistry.size,
-      currentGeneration
-    }
+  function getResourceSnapshot(): { registeredEntities: number; transientDetails: number; currentGeneration: string } {
+    return { registeredEntities: entityLocatorIndex.size, transientDetails: transientDetailRegistry.size, currentGeneration }
   }
-
-  // ── 清理过期瞬态 ─────────────────────────────────────────────────────────
 
   function purgeExpiredTransients(): number {
     const now = Date.now()
     let purged = 0
     for (const [key, entry] of transientDetailRegistry) {
-      if (now - entry.createdAt > entry.ttlMs) {
-        transientDetailRegistry.delete(key)
-        purged++
-      }
+      if (now - entry.createdAt > entry.ttlMs) { transientDetailRegistry.delete(key); purged++ }
     }
-    if (purged > 0) {
-      logger.info('[DetailService] purged expired transients', { count: purged })
-    }
+    if (purged > 0) logger.info('[DetailService] purged expired transients', { count: purged })
     return purged
   }
 
-  // ── 取消进行中请求 ───────────────────────────────────────────────────────
-
   function cancelByDetailKey(detailKey: string): boolean {
     const controller = activeRequests.get(detailKey)
-    if (controller) {
-      controller.abort()
-      activeRequests.delete(detailKey)
-      logger.info('[DetailService] detail request cancelled by detailKey', { detailKey })
-      return true
+    if (!controller) {
+      logger.info('[DetailService] cancel requested but no active request', { detailKey: shortId(detailKey) })
+      return false
     }
-    logger.info('[DetailService] cancel requested but no active request', { detailKey })
-    return false
+    controller.abort()
+    activeRequests.delete(detailKey)
+    logger.info('[DetailService] detail request cancelled by detailKey', { detailKey: shortId(detailKey) })
+    return true
   }
 
   return {
-    // 注册/注销
     registerEntity,
     unregisterEntity,
     registerTransient,
+    registerMcpTransient,
     unregisterTransient,
     unregisterTransientBySession,
-    // Generation
     invalidateGeneration,
     getCurrentGeneration,
-    // 请求
     handleDetailRequest,
     handleDetailRequestChunked,
     cancelByDetailKey,
-    // 清理
     cleanupBySession,
     purgeExpiredTransients,
-    // 查询
-    getResourceSnapshot
+    getResourceSnapshot,
   }
 }
 

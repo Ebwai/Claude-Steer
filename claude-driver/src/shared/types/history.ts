@@ -7,6 +7,7 @@ import type { LineInsertion } from './lineInsertion'
 import type { GitMark, Milestone } from './index'
 import type { ResourceSnapshot } from './resources'
 
+
 export type HistoryDetailsState = 'shell' | 'hydrating' | 'resident' | 'error'
 
 export interface HistorySidecarFlags {

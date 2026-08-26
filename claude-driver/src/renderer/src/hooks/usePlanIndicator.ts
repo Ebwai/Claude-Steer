@@ -27,7 +27,7 @@ const POSSIBLY_PAUSED_TIMEOUT_MS = 5 * 60 * 1000
  * 容错：标题末尾状态标记前有无空格均可识别
  */
 export function parsePlanNodes(content: string, projectId: string): PlanNode[] {
-  const lines = content.split('\n')
+  const lines = content.split(/\r?\n/)
   const nodes: PlanNode[] = []
   let currentMId: string | null = null
   let currentSId: string | null = null

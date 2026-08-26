@@ -451,9 +451,159 @@ function getHistoryService(): HistoryService {
 
 // ── DetailService 全局实例（统一详情权威源）────────────────────────────────
 import type { DetailService } from './lib/history'
-import type { DetailRequest } from '../shared/types/detail'
+import type {
+  DetailRequest,
+  DetailRef,
+  McpRequestDetail,
+  McpResponseDetail,
+  McpResponseStatus,
+} from '../shared/types/detail'
 
 let detailService: DetailService | null = null
+
+/**
+ * 实时 MCP 返回去重状态。
+ * key 同时包含 session、agent 和 tool_use_id，避免同名工具或不同 Subagent 串线。
+ */
+const mcpResponseSeenAt = new Map<string, number>()
+const MCP_RESPONSE_SEEN_TTL_MS = 30 * 60 * 1000
+const MCP_RESPONSE_SEEN_MAX = 4096
+const mcpResponseRefs = new Map<string, {
+  ref: DetailRef
+  status: McpResponseStatus
+}>()
+const MCP_RESPONSE_REF_MAX = 4096
+
+function isMcpToolName(toolName: unknown): toolName is string {
+  return typeof toolName === 'string' && toolName.startsWith('mcp__')
+}
+
+function mcpDetailScope(sessionId: string, agentId: string | undefined, toolUseId: string): string {
+  return `${sessionId}::${agentId ?? 'main'}::${toolUseId}`
+}
+
+function mcpDetailKey(
+  sessionId: string,
+  agentId: string | undefined,
+  toolUseId: string,
+  direction: 'request' | 'response',
+): string {
+  return `mcp:${mcpDetailScope(sessionId, agentId, toolUseId)}:${direction}`
+}
+
+function pruneMcpResponseSeen(now: number): void {
+  for (const [key, seenAt] of mcpResponseSeenAt) {
+    if (now - seenAt > MCP_RESPONSE_SEEN_TTL_MS) {
+      mcpResponseSeenAt.delete(key)
+      mcpResponseRefs.delete(key)
+    }
+  }
+  while (mcpResponseSeenAt.size > MCP_RESPONSE_SEEN_MAX) {
+    const oldestKey = mcpResponseSeenAt.keys().next().value as string | undefined
+    if (!oldestKey) break
+    mcpResponseSeenAt.delete(oldestKey)
+    mcpResponseRefs.delete(oldestKey)
+  }
+  while (mcpResponseRefs.size > MCP_RESPONSE_REF_MAX) {
+    const oldestKey = mcpResponseRefs.keys().next().value as string | undefined
+    if (!oldestKey) break
+    mcpResponseRefs.delete(oldestKey)
+  }
+}
+
+/**
+ * 在 HookEventBus 广播前登记 MCP 详情，并只向 Renderer 注入轻量引用。
+ * 这里不按工具名或到达顺序推断关联；缺少 tool_use_id 时明确放弃配对并记录日志。
+ */
+function enrichMcpHookPayload(payload: HookPayload): HookPayload {
+  if (!isMcpToolName((payload as { tool_name?: unknown }).tool_name)) return payload
+
+  const toolName = (payload as { tool_name: string }).tool_name
+  const toolUseId = (payload as { tool_use_id?: unknown }).tool_use_id
+  const agentId = (payload as { agent_id?: unknown }).agent_id
+  const normalizedAgentId = typeof agentId === 'string' && agentId.length > 0 ? agentId : undefined
+  if (typeof toolUseId !== 'string' || toolUseId.length === 0) {
+    console.warn(`[MCP] ${payload.hook_event_name} missing tool_use_id; detail pairing skipped tool=${toolName}`)
+    return payload
+  }
+
+  const sessionId = payload.session_id
+  const scope = mcpDetailScope(sessionId, normalizedAgentId, toolUseId)
+  const service = getDetailService()
+  const now = Date.now()
+  pruneMcpResponseSeen(now)
+
+  if (payload.hook_event_name === 'PreToolUse') {
+    const input = (payload as { tool_input?: unknown }).tool_input ?? {}
+    const detail: McpRequestDetail = {
+      kind: 'mcp-request',
+      toolUseId,
+      toolName,
+      input,
+    }
+    const ref = service.registerMcpTransient(
+      mcpDetailKey(sessionId, normalizedAgentId, toolUseId, 'request'),
+      detail,
+      sessionId,
+    )
+    const cachedResponse = mcpResponseRefs.get(scope)
+    const earlyResponse = cachedResponse?.ref.sourceGeneration === service.getCurrentGeneration()
+      ? cachedResponse
+      : undefined
+    if (cachedResponse && !earlyResponse) {
+      mcpResponseRefs.delete(scope)
+      mcpResponseSeenAt.delete(scope)
+    }
+    console.info(`[MCP] request detail registered scope=${scope.slice(0, 80)} bytes=${ref.estimatedSize} earlyResponse=${!!earlyResponse}`)
+    return {
+      ...payload,
+      ...(normalizedAgentId ? { agent_id: normalizedAgentId } : {}),
+      mcp_request_detail_ref: ref,
+      ...(earlyResponse
+        ? {
+            mcp_response_detail_ref: earlyResponse.ref,
+            mcp_response_status: earlyResponse.status,
+          }
+        : { mcp_response_status: 'pending' satisfies McpResponseStatus }),
+    } as HookPayload
+  }
+
+  if (mcpResponseSeenAt.has(scope)) {
+    console.warn(`[MCP] duplicate response ignored scope=${scope.slice(0, 80)} event=${payload.hook_event_name}`)
+    return payload
+  }
+  mcpResponseSeenAt.set(scope, now)
+
+  const rawResponse = (payload as { tool_response?: unknown }).tool_response
+  const isFailure = payload.hook_event_name === 'PostToolUseFailure'
+  const response: McpResponseDetail = {
+    kind: 'mcp-response',
+    toolUseId,
+    content: rawResponse,
+    isError: isFailure,
+    errorMessage: isFailure && rawResponse !== undefined ? String(rawResponse) : undefined,
+  }
+  const responseStatus: McpResponseStatus = isFailure
+    ? 'error'
+    : rawResponse === undefined
+      ? 'empty'
+      : 'ready'
+  const responseDetailKey = mcpDetailKey(sessionId, normalizedAgentId, toolUseId, 'response')
+  const ref = service.registerMcpTransient(
+    responseDetailKey,
+    response,
+    sessionId,
+  )
+  mcpResponseRefs.set(scope, { ref, status: responseStatus })
+  pruneMcpResponseSeen(now)
+  console.info(`[MCP] response detail registered scope=${scope.slice(0, 80)} status=${responseStatus} bytes=${ref.estimatedSize}`)
+  return {
+    ...payload,
+    ...(normalizedAgentId ? { agent_id: normalizedAgentId } : {}),
+    mcp_response_detail_ref: ref,
+    mcp_response_status: responseStatus,
+  } as HookPayload
+}
 
 function getDetailService(): DetailService {
   if (!detailService) {
@@ -3549,7 +3699,10 @@ async function startServices(): Promise<void> {
   try {
     await startHookServer(HOOK_PORT, {
       onHookEvent: (payload) => {
-        bus.dispatchHook(payload)
+        // MCP 完整请求/返回先进入 Main 详情注册表，再广播轻量 Hook shell。
+        // 这样 Renderer 在收到事件时已经拥有可按需读取的 DetailRef。
+        const enrichedPayload = enrichMcpHookPayload(payload)
+        bus.dispatchHook(enrichedPayload)
 
         // insight / chat 临时 PTY 产生的 Hook 完全隔离：按 ptyId 识别（运行在 home 目录，不与项目冲突）
         {
@@ -3621,8 +3774,18 @@ async function startServices(): Promise<void> {
           ? claudeToPtyMap.get(payload.session_id)
           : undefined
 
-        // SessionEnd：解绑（若无绑定自动忽略，覆盖"branch 切走后旧 session SessionEnd"的情况）
+        // SessionEnd：先回收该 Session 的实时 MCP 详情，再解绑（若无绑定自动忽略，
+        // 覆盖"branch 切走后旧 session SessionEnd"的情况）。详情不依赖 Renderer 是否已展开，
+        // 但 Session 终止后必须释放其 transient registry 和早到 response 配对缓存。
         if (payload.hook_event_name === 'SessionEnd') {
+          getDetailService().cleanupBySession(payload.session_id)
+          for (const [scope] of mcpResponseRefs) {
+            if (scope.startsWith(`${payload.session_id}::`)) {
+              mcpResponseRefs.delete(scope)
+              mcpResponseSeenAt.delete(scope)
+            }
+          }
+          console.info(`[MCP] session detail cleanup session=${payload.session_id.slice(0, 8)}`)
           unbindPtyFromClaudeSession(payload.session_id)
         }
 

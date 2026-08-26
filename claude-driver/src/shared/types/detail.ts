@@ -54,6 +54,42 @@ export interface EntityShell {
   estimatedSize: number
 }
 
+
+// ── MCP 双区域详情契约 ───────────────────────────────────────────────────────
+
+/** MCP 请求/返回在时间线 shell 中的关联状态。 */
+export type McpRequestStatus = 'missing' | 'available'
+export type McpResponseStatus = 'pending' | 'ready' | 'empty' | 'error' | 'missing'
+
+/** MCP 插入线使用的轻量关联 shell，不驻留完整 input/content。 */
+export interface McpCallShell {
+  callId: string
+  toolUseId: string
+  toolName: string
+  displayName?: string
+  requestStatus: McpRequestStatus
+  responseStatus: McpResponseStatus
+  requestDetailRef?: DetailRef
+  responseDetailRef?: DetailRef
+}
+
+/** MCP 请求详情：input 保留真实 Claude Code tool_use.input。 */
+export interface McpRequestDetail {
+  kind: 'mcp-request'
+  toolUseId: string
+  toolName: string
+  input: unknown
+}
+
+/** MCP 返回详情：content 可为字符串、数组、对象或 null。 */
+export interface McpResponseDetail {
+  kind: 'mcp-response'
+  toolUseId: string
+  content: unknown
+  isError: boolean
+  errorMessage?: string
+}
+
 // ── L2 详情定位（Main 持有）────────────────────────────────────────────────
 
 /**

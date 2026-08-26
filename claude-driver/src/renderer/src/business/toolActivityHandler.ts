@@ -12,6 +12,7 @@ import {
 import { appendInsertion, updateInsertionStatus, patchInsertion, appendSubagentInsertion, updateSubagentInsertionStatus, patchSubagentInsertion } from '@renderer/capabilities/timelineStore'
 import { lineInsertionsBySessionAtom } from '@renderer/atoms/timeline.atom'
 import type { LineInsertion, LineInsertionType, LineInsertionLength } from '@shared/types/lineInsertion'
+import type { McpCallShell } from '@shared/types/detail'
 import type { TestStore } from '../../../__tests__/helpers/createTestStore'
 
 type Store = Pick<TestStore, 'get' | 'set'>
@@ -60,6 +61,35 @@ function toolNameToWorkStatus(toolName: string): string {
 function categorizeToolName(toolName: string): 'tool' | 'mcp' {
   if (toolName.startsWith('mcp__')) return 'mcp'
   return 'tool'
+}
+
+function isMcpToolName(toolName: string): boolean {
+  return toolName.startsWith('mcp__')
+}
+
+function buildMcpCallShell(
+  payload: {
+    tool_use_id?: string
+    mcp_request_detail_ref?: McpCallShell['requestDetailRef']
+    mcp_response_detail_ref?: McpCallShell['responseDetailRef']
+    mcp_response_status?: McpCallShell['responseStatus']
+  },
+  toolName: string,
+  sessionId: string,
+): McpCallShell | undefined {
+  if (!payload.tool_use_id) {
+    console.warn(`[toolActivityHandler] MCP missing tool_use_id; shell skipped tool=${toolName}`)
+    return undefined
+  }
+  return {
+    callId: `${sessionId}-mcp-${payload.tool_use_id}`,
+    toolUseId: payload.tool_use_id,
+    toolName,
+    requestStatus: payload.mcp_request_detail_ref ? 'available' : 'missing',
+    responseStatus: payload.mcp_response_status ?? 'pending',
+    ...(payload.mcp_request_detail_ref ? { requestDetailRef: payload.mcp_request_detail_ref } : {}),
+    ...(payload.mcp_response_detail_ref ? { responseDetailRef: payload.mcp_response_detail_ref } : {}),
+  }
 }
 
 /**
@@ -191,6 +221,8 @@ function buildToolInsertion(
   sessionId: string,
   timestamp: number,
   extraFields?: Record<string, string>,
+  mcpCall?: McpCallShell,
+  toolUseId?: string,
 ): LineInsertion | null {
   const category = categorizeToolName(toolName)
   const type: LineInsertionType = category === 'mcp' ? 'mcp' : 'tool'
@@ -207,6 +239,8 @@ function buildToolInsertion(
     badgeContent: { toolName, displayText, ...extraFields },
     status: 'running',
     isAnimating: true,
+    ...(toolUseId ? { toolUseId } : {}),
+    ...(mcpCall ? { mcpCall } : {}),
   }
 }
 
@@ -333,6 +367,9 @@ export function createToolActivityHandler(store: Store) {
     const entryId = `${claudeId}-${toolName}-${hookEvent.receivedAt}`
     const displayText = toolNameToWorkStatus(toolName)
     const category = categorizeToolName(toolName)
+    const mcpCall = isMcpToolName(toolName)
+      ? buildMcpCallShell(payload, toolName, claudeId)
+      : undefined
 
     toolStart(store, claudeId, hookEvent.cwd, {
       id: entryId,
@@ -375,7 +412,16 @@ export function createToolActivityHandler(store: Store) {
       } else {
         // 普通工具 / MCP：右向插入线，携带工具专属字段
         const { light } = extractToolBadgeFields(toolName, toolInput, entryId)
-        const insertion = buildToolInsertion(toolName, displayText, entryId, claudeId, hookEvent.receivedAt, light)
+        const insertion = buildToolInsertion(
+          toolName,
+          displayText,
+          entryId,
+          claudeId,
+          hookEvent.receivedAt,
+          light,
+          mcpCall,
+          payload.tool_use_id,
+        )
         if (insertion) appendInsertion(store, claudeId, insertion)
         console.log(`[toolActivityHandler] Tool: name=${toolName} extraFields=${Object.keys(light).join(',')}`)
       }
@@ -383,11 +429,56 @@ export function createToolActivityHandler(store: Store) {
       // Subagent 内部工具调用：写到 agent_id 的插入线（右向）
       const agentId = payload.agent_id!
       const { light } = extractToolBadgeFields(toolName, toolInput, entryId)
-      const insertion = buildToolInsertion(toolName, displayText, entryId, agentId, hookEvent.receivedAt, light)
+      const insertion = buildToolInsertion(
+        toolName,
+        displayText,
+        entryId,
+        agentId,
+        hookEvent.receivedAt,
+        light,
+        mcpCall,
+        payload.tool_use_id,
+      )
       if (insertion) appendSubagentInsertion(store, claudeId, agentId, insertion)
       // 注册 agentId 到父 session（第一次注册时才实际写入）
       registerSubagentId(store, claudeId, agentId)
     }
+  }
+
+  function patchMcpResponse(
+    claudeId: string,
+    agentId: string | undefined,
+    toolUseId: string | undefined,
+    responseStatus: McpCallShell['responseStatus'],
+    responseDetailRef: McpCallShell['responseDetailRef'] | undefined,
+  ): boolean {
+    if (!toolUseId) {
+      console.warn('[toolActivityHandler] MCP response missing tool_use_id; insertion not patched')
+      return false
+    }
+    const targetSessionId = agentId ?? claudeId
+    const insertions = store.get(lineInsertionsBySessionAtom(targetSessionId))
+    const target = insertions.find((ins) => ins.mcpCall?.toolUseId === toolUseId)
+    if (!target?.mcpCall) {
+      console.warn(`[toolActivityHandler] MCP response unmatched toolUseId=${toolUseId.slice(0, 12)}`)
+      return false
+    }
+
+    const mcpCall: McpCallShell = {
+      ...target.mcpCall,
+      responseStatus,
+      ...(responseDetailRef ? { responseDetailRef } : {}),
+    }
+    const status: 'done' | 'failed' = responseStatus === 'error' ? 'failed' : 'done'
+    if (agentId) {
+      updateSubagentInsertionStatus(store, claudeId, agentId, { toolUseId }, status)
+      patchSubagentInsertion(store, claudeId, agentId, target.id, { mcpCall })
+    } else {
+      updateInsertionStatus(store, claudeId, { toolUseId }, status)
+      patchInsertion(store, claudeId, target.id, { mcpCall })
+    }
+    console.info(`[toolActivityHandler] MCP response patched toolUseId=${toolUseId.slice(0, 12)} status=${responseStatus}`)
+    return true
   }
 
   function handlePostToolUse(hookEvent: HookEvent): void {
@@ -404,6 +495,20 @@ export function createToolActivityHandler(store: Store) {
 
     toolDone(store, claudeId, toolName)
     if (isAgentTool(toolName)) hideSubagent(store, claudeId)
+
+    const mcpCall = isMcpToolName(toolName)
+      ? buildMcpCallShell(payload, toolName, claudeId)
+      : undefined
+    if (mcpCall) {
+      patchMcpResponse(
+        claudeId,
+        payload.agent_id,
+        payload.tool_use_id,
+        mcpCall.responseStatus,
+        mcpCall.responseDetailRef,
+      )
+      return
+    }
 
     if (!isSubagentTool) {
       if (isAgentTool(toolName)) {
@@ -534,12 +639,29 @@ export function createToolActivityHandler(store: Store) {
   }
 
   function handlePostToolUseFailure(hookEvent: HookEvent): void {
-    const payload = hookEvent.payload as { tool_name?: string; agent_id?: string; tool_use_id?: string }
+    const payload = hookEvent.payload as {
+      tool_name?: string
+      agent_id?: string
+      tool_use_id?: string
+      mcp_response_detail_ref?: McpCallShell['responseDetailRef']
+      mcp_response_status?: McpCallShell['responseStatus']
+    }
     const toolName = payload.tool_name ?? ''
     const isSubagentTool = !!payload.agent_id
     const claudeId = hookEvent.sessionId
 
     toolFailed(store, claudeId, toolName)
+
+    if (isMcpToolName(toolName)) {
+      patchMcpResponse(
+        claudeId,
+        payload.agent_id,
+        payload.tool_use_id,
+        payload.mcp_response_status ?? 'error',
+        payload.mcp_response_detail_ref,
+      )
+      return
+    }
 
     if (!isSubagentTool) {
       if (isAgentTool(toolName)) {

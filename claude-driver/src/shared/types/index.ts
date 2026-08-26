@@ -199,7 +199,13 @@ export interface HookPayloadToolUse extends HookPayloadBase {
   tool_name: string
   tool_input: Record<string, unknown>
   tool_response?: unknown
-  /** 工具调用唯一 ID——PreToolUse 与对应 PostToolUse 携带相同值，是 分配/返回 精确配对的依据 */
+  /** MCP 详情引用，由 Main DetailService 注入；不含完整 payload。 */
+  mcp_request_detail_ref?: import('./detail').DetailRef
+  mcp_response_detail_ref?: import('./detail').DetailRef
+  mcp_response_status?: import('./detail').McpResponseStatus
+  /** Subagent 作用域；必须与 session_id 一起参与 MCP 调用配对。 */
+  agent_id?: string
+  /** 工具调用唯一 ID——PreToolUse 与对应 PostToolUse 携带相同值，是分配/返回精确配对的依据。 */
   tool_use_id?: string
 }
 

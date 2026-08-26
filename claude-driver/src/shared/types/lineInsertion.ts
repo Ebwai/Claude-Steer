@@ -46,6 +46,8 @@ export interface LineInsertion {
    * "分配任务"线写入此值，"返回任务结果"线通过相同值精确配对，不依赖顺序
    */
   toolUseId?: string
+  /** MCP 插入线轻量 shell；完整请求/返回仅通过 DetailRef 按需读取。 */
+  mcpCall?: import('./detail').McpCallShell
   /**
    * branch 类型专用：branch 创建瞬间父框高度快照（px）
    * 持久化到 insertions.jsonl，重启后直接用于恢复子框 Y 位置，不需要估算

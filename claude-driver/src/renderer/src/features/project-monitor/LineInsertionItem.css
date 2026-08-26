@@ -219,6 +219,61 @@
   line-height: 1.5;
 }
 
+.ins-mcp-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 320px;
+  max-width: 560px;
+}
+
+.ins-mcp-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.ins-mcp-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid;
+  border-radius: 3px;
+  background: var(--bg3);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ins-mcp-section-toggle:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.ins-mcp-section-body {
+  max-height: 360px;
+  overflow: auto;
+  padding: var(--space-sm);
+  background: var(--bg1);
+  border: 1px solid var(--bd);
+  border-radius: 3px;
+}
+
+.ins-mcp-payload {
+  margin: 0;
+  color: var(--tx2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
 /* 展开态用：允许换行，完整显示长文本 */
 .ins-badge-tool-detail-wrap {
   font-size: var(--text-xs);

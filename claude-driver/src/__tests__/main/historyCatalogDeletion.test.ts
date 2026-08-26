@@ -5,7 +5,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HistoryCatalogEntry, HistoryDeleteInput } from '../../shared/types/history'
 import {
   buildHistoryClusters,
@@ -16,6 +16,7 @@ import { deleteHistoryTarget } from '../../main/lib/history/HistoryDeletion'
 import { loadHistoryClusterProjection } from '../../main/lib/history/HistoryDetailLoader'
 import { parseJsonlLine, parseJsonlObject } from '../../main/lib/jsonl/JsonlParser'
 import { resolveProjectDirectory, resolveSessionBundle } from '../../main/lib/history/HistoryPaths'
+import { createDetailService } from '../../main/lib/history/DetailService'
 
 const PROJECT_ID = 'project-1'
 const PROJECT_PATH = 'F:\\work\\project-1'
@@ -90,6 +91,7 @@ function deletionInput(targetSessionId: string, scope: 'cluster' | 'branch'): Hi
   }
 }
 
+
 describe('history catalog and deletion', () => {
   let claudeDir: string
 
@@ -100,6 +102,80 @@ describe('history catalog and deletion', () => {
   afterEach(() => {
     if (claudeDir.startsWith(os.tmpdir()) && fs.existsSync(claudeDir)) {
       fs.rmSync(claudeDir, { recursive: true, force: true })
+    }
+  })
+
+  it('DetailService 按历史 locator 返回规范化 MCP request/response 详情', async () => {
+    const filePath = path.join(claudeDir, 'mcp.jsonl')
+    const request = {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'detail-tool-id', name: 'mcp__server__query', input: { query: 'full', limit: 2 } }]
+      }
+    }
+    const response = {
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'detail-tool-id', content: { rows: [{ id: 1 }], next: null }, is_error: false }]
+      }
+    }
+    const requestLine = JSON.stringify(request)
+    const content = `${requestLine}\n${JSON.stringify(response)}\n`
+    fs.writeFileSync(filePath, content, 'utf8')
+    const service = createDetailService({
+      readFile: async (file, offset, length) => fs.readFileSync(file).subarray(offset, offset + length),
+      sendToRenderer: () => undefined,
+      logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    })
+    const requestRef = service.registerEntity(
+      'mcp:request',
+      { filePath, byteStart: 0, byteEndExclusive: Buffer.byteLength(requestLine, 'utf8') + 1, encoding: 'utf-8', lineEnding: 'lf' },
+      'generation-1',
+      100,
+    )
+    const responseRef = service.registerEntity(
+      'mcp:response',
+      { filePath, byteStart: Buffer.byteLength(requestLine, 'utf8') + 1, byteEndExclusive: Buffer.byteLength(content, 'utf8'), encoding: 'utf-8', lineEnding: 'lf' },
+      'generation-1',
+      100,
+    )
+    const requestResult = await service.handleDetailRequest({ detailKey: requestRef.detailKey, revision: requestRef.revision, sourceGeneration: requestRef.sourceGeneration })
+    const responseResult = await service.handleDetailRequest({ detailKey: responseRef.detailKey, revision: responseRef.revision, sourceGeneration: responseRef.sourceGeneration })
+
+    expect(requestResult).toMatchObject({ status: 'ready' })
+    expect(JSON.parse(requestResult.data ?? '')).toMatchObject({ kind: 'mcp-request', toolUseId: 'detail-tool-id', input: { query: 'full', limit: 2 } })
+    expect(responseResult).toMatchObject({ status: 'ready' })
+    expect(JSON.parse(responseResult.data ?? '')).toMatchObject({ kind: 'mcp-response', toolUseId: 'detail-tool-id', content: { rows: [{ id: 1 }], next: null }, isError: false })
+  })
+
+  it('实时 MCP 详情跨过默认短 TTL 后仍可按引用读取', async () => {
+    const service = createDetailService({
+      readFile: async () => Buffer.alloc(0),
+      sendToRenderer: () => undefined,
+      logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+    })
+    const requestRef = service.registerMcpTransient(
+      'mcp:live-session::main::tool-live:request',
+      { kind: 'mcp-request', toolUseId: 'tool-live', toolName: 'mcp__server__query', input: { query: 'delayed' } },
+      'live-session',
+    )
+    const responseRef = service.registerMcpTransient(
+      'mcp:live-session::main::tool-live:response',
+      { kind: 'mcp-response', toolUseId: 'tool-live', content: { ok: true }, isError: false },
+      'live-session',
+    )
+
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(Date.now() + 31_000))
+    try {
+      const requestResult = await service.handleDetailRequest({ ...requestRef })
+      const responseResult = await service.handleDetailRequest({ ...responseRef })
+      expect(requestResult).toMatchObject({ status: 'ready' })
+      expect(responseResult).toMatchObject({ status: 'ready' })
+      expect(JSON.parse(requestResult.data ?? '').input).toEqual({ query: 'delayed' })
+      expect(JSON.parse(responseResult.data ?? '').content).toEqual({ ok: true })
+    } finally {
+      vi.useRealTimers()
     }
   })
 
@@ -237,6 +313,128 @@ describe('history catalog and deletion', () => {
     }
     walk(projection)
     expect(forbiddenKeys).toEqual([])
+  })
+
+  it('历史 MCP locator 支持 BOM/CRLF、方向分离并保持主线与 Subagent 作用域隔离', async () => {
+    const entries = [entry('root', 100)]
+    const mainRequest = {
+      type: 'assistant',
+      uuid: 'main-request-node',
+      message: {
+        content: [{
+          type: 'tool_use',
+          id: 'shared-tool-use-id',
+          name: 'mcp__main__query',
+          input: { query: 'main' }
+        }]
+      }
+    }
+    const mainResponse = {
+      type: 'user',
+      uuid: 'main-response-node',
+      message: {
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'shared-tool-use-id',
+          content: [{ type: 'text', text: 'main result' }],
+          is_error: false
+        }]
+      }
+    }
+    fs.writeFileSync(
+      path.join(claudeDir, 'root.jsonl'),
+      `﻿${JSON.stringify(mainRequest)}\r\n${JSON.stringify(mainResponse)}\r\n`,
+      'utf8'
+    )
+
+    const subagentsDir = path.join(claudeDir, 'root', 'subagents')
+    fs.mkdirSync(subagentsDir, { recursive: true })
+    const subRequest = {
+      type: 'assistant',
+      uuid: 'sub-request-node',
+      isSidechain: true,
+      agentId: 'agent-a',
+      message: {
+        content: [{
+          type: 'tool_use',
+          id: 'shared-tool-use-id',
+          name: 'mcp__sub__query',
+          input: { query: 'subagent' }
+        }]
+      }
+    }
+    fs.writeFileSync(
+      path.join(subagentsDir, 'agent-agent-a.jsonl'),
+      `${JSON.stringify(subRequest)}\r\n`,
+      'utf8'
+    )
+
+    const result = await loadHistoryClusterProjection(snapshot(claudeDir, entries), 'root')
+    const mainRequestKey = 'root:main:main-request-node'
+    const mainResponseKey = 'root:main:main-response-node'
+    const subRequestKey = 'root:agent-a:sub-request-node'
+
+    expect(result.mcpLocatorByNodeId.get(mainRequestKey)).toMatchObject({
+      toolUseId: 'shared-tool-use-id',
+      toolName: 'mcp__main__query',
+      direction: 'request'
+    })
+    expect(result.mcpLocatorByNodeId.get(mainResponseKey)).toMatchObject({
+      toolUseId: 'shared-tool-use-id',
+      toolName: 'mcp__main__query',
+      direction: 'response'
+    })
+    expect(result.mcpLocatorByNodeId.get(subRequestKey)).toMatchObject({
+      toolUseId: 'shared-tool-use-id',
+      toolName: 'mcp__sub__query',
+      direction: 'request'
+    })
+
+    const mainRequestRange = result.byteRangeByNodeId.get(mainRequestKey)
+    const mainResponseRange = result.byteRangeByNodeId.get(mainResponseKey)
+    expect(mainRequestRange?.lineEnding).toBe('crlf')
+    expect(mainResponseRange?.lineEnding).toBe('crlf')
+    expect(mainRequestRange?.byteStart).toBe(3)
+    expect(mainRequestRange?.byteEndExclusive).toBe(mainResponseRange?.byteStart)
+    expect(JSON.parse(fs.readFileSync(path.join(claudeDir, 'root.jsonl')).subarray(
+      mainRequestRange!.byteStart,
+      mainRequestRange!.byteEndExclusive
+    ).toString('utf8'))).toMatchObject(mainRequest)
+  })
+
+  it('历史 MCP 只识别真实 MCP 请求对应的返回，普通工具返回保持未关联', async () => {
+    const entries = [entry('root', 100)]
+    fs.writeFileSync(
+      path.join(claudeDir, 'root.jsonl'),
+      [
+        {
+          type: 'assistant',
+          uuid: 'mcp-request',
+          message: { content: [{ type: 'tool_use', id: 'mcp-id', name: 'mcp__server__call', input: {} }] }
+        },
+        {
+          type: 'user',
+          uuid: 'mcp-response',
+          message: { content: [{ type: 'tool_result', tool_use_id: 'mcp-id', content: null, is_error: true }] }
+        },
+        {
+          type: 'user',
+          uuid: 'ordinary-response',
+          message: { content: [{ type: 'tool_result', tool_use_id: 'ordinary-id', content: 'ordinary' }] }
+        }
+      ].map((line) => JSON.stringify(line)).join('\n'),
+      'utf8'
+    )
+
+    const result = await loadHistoryClusterProjection(snapshot(claudeDir, entries), 'root')
+
+    expect(result.mcpLocatorByNodeId.has('root:main:mcp-request')).toBe(true)
+    expect(result.mcpLocatorByNodeId.get('root:main:mcp-response')).toMatchObject({
+      direction: 'response',
+      toolUseId: 'mcp-id',
+      isError: true
+    })
+    expect(result.mcpLocatorByNodeId.has('root:main:ordinary-response')).toBe(false)
   })
 
   it('删除主线时连带删除全部 Branch、sidecar 与 subagent 目录', async () => {

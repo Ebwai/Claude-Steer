@@ -34,7 +34,10 @@ import { scanHistoryTokenInventory } from './HistoryTokenInventory'
 import { resolveProjectDirectory } from './HistoryPaths'
 
 import type { DetailService } from './DetailService'
-import type { HistoryClusterProjection } from '../../../shared/types/history'
+import type { HistoryClusterProjection, HistorySessionProjection, HistoryTimelineNode } from '../../../shared/types/history'
+import type { McpCallShell } from '../../../shared/types/detail'
+import type { LineInsertion } from '../../../shared/types/lineInsertion'
+import path from 'path'
 
 interface RequestState {
   requestId: string
@@ -106,42 +109,143 @@ export class HistoryService {
    */
   private _registerProjectionLocators(
     projection: HistoryClusterProjection,
-    byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number }>,
+    byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number; lineEnding?: 'lf' | 'crlf' }>,
     generation: string,
     claudeDir: string,
+    mcpLocatorByNodeId?: Map<string, { toolUseId: string; toolName: string; direction: 'request' | 'response'; isError?: boolean }>,
   ): void {
     if (!this.deps.detailService) return
     const ds = this.deps.detailService
-    for (const session of projection.sessions) {
-      const filePath = `${claudeDir}/${session.sessionId}.jsonl`
-      for (const node of session.timeline) {
-        if (node.text === undefined) continue
-        const byteRange = byteRangeByNodeId.get(node.id)
+
+    const processTimeline = (
+      timeline: HistoryTimelineNode[],
+      insertions: HistorySessionProjection['insertions'],
+      filePath: string,
+      scope: string,
+      scopedRanges: Map<string, { byteStart: number; byteEndExclusive: number; lineEnding?: 'lf' | 'crlf' }>,
+      scopedMcpLocators: Map<string, { toolUseId: string; toolName: string; direction: 'request' | 'response'; isError?: boolean }>,
+      agentId?: string,
+    ): void => {
+      const refsByToolUseId = new Map<string, {
+        toolName: string
+        requestDetailRef?: ReturnType<typeof ds.registerEntity>
+        responseDetailRef?: ReturnType<typeof ds.registerEntity>
+        responseStatus: McpCallShell['responseStatus']
+      }>()
+
+      for (const node of timeline) {
+        const byteRange = scopedRanges.get(node.id)
         if (!byteRange) continue
-        const ref = ds.registerEntity(
-          node.id,
-          { filePath, byteStart: byteRange.byteStart, byteEndExclusive: byteRange.byteEndExclusive, encoding: 'utf-8', lineEnding: 'lf' },
-          generation,
-          Buffer.byteLength(node.text, 'utf-8'),
-        )
-        node.detailRef = { detailKey: ref.detailKey, revision: ref.revision, sourceGeneration: ref.sourceGeneration, estimatedSize: ref.estimatedSize }
-        console.info(`[HistoryService] entity registered id=${node.id.slice(0, 12)} byte=[${byteRange.byteStart},${byteRange.byteEndExclusive}) file=${session.sessionId.slice(0, 8)}`)
-      }
-      // Subagent 节点
-      for (const sub of session.subagents) {
-        const subFilePath = `${claudeDir}/${session.sessionId}/subagents/agent-${sub.agentId}.jsonl`
-        for (const node of sub.timeline) {
-          if (node.text === undefined) continue
-          const byteRange = byteRangeByNodeId.get(node.id)
-          if (!byteRange) continue
-          const ref = ds.registerEntity(
-            node.id,
-            { filePath: subFilePath, byteStart: byteRange.byteStart, byteEndExclusive: byteRange.byteEndExclusive, encoding: 'utf-8', lineEnding: 'lf' },
-            generation,
-            Buffer.byteLength(node.text, 'utf-8'),
-          )
-          node.detailRef = { detailKey: ref.detailKey, revision: ref.revision, sourceGeneration: ref.sourceGeneration, estimatedSize: ref.estimatedSize }
+        const locator = scopedMcpLocators.get(node.id)
+        if (!locator) {
+          if (node.text !== undefined) {
+            const ref = ds.registerEntity(
+              node.id,
+              { filePath, byteStart: byteRange.byteStart, byteEndExclusive: byteRange.byteEndExclusive, encoding: 'utf-8', lineEnding: byteRange.lineEnding ?? 'lf' },
+              generation,
+              Buffer.byteLength(node.text, 'utf-8'),
+            )
+            node.detailRef = { detailKey: ref.detailKey, revision: ref.revision, sourceGeneration: ref.sourceGeneration, estimatedSize: ref.estimatedSize }
+          }
+          continue
         }
+
+        const detailKey = `mcp:history:${scope}:${locator.toolUseId}:${locator.direction}`
+        const ref = ds.registerEntity(
+          detailKey,
+          { filePath, byteStart: byteRange.byteStart, byteEndExclusive: byteRange.byteEndExclusive, encoding: 'utf-8', lineEnding: byteRange.lineEnding ?? 'lf' },
+          generation,
+          byteRange.byteEndExclusive - byteRange.byteStart,
+        )
+        const current = refsByToolUseId.get(locator.toolUseId) ?? {
+          toolName: locator.toolName,
+          responseStatus: 'missing' as McpCallShell['responseStatus'],
+        }
+        if (locator.direction === 'request') {
+          current.toolName = locator.toolName
+          current.requestDetailRef = ref
+        } else {
+          current.responseDetailRef = ref
+          current.responseStatus = locator.isError ? 'error' : 'ready'
+        }
+        refsByToolUseId.set(locator.toolUseId, current)
+        console.info(`[HistoryService] MCP ${locator.direction} locator registered toolUseId=${locator.toolUseId.slice(0, 12)} scope=${scope.slice(0, 24)} bytes=${ref.estimatedSize}`)
+      }
+
+      const insertionByToolUseId = new Map<string, LineInsertion>(
+        insertions
+          .filter((insertion) => !!insertion.toolUseId)
+          .map((insertion) => [insertion.toolUseId!, insertion]),
+      )
+      for (const [toolUseId, refs] of refsByToolUseId) {
+        const displayName = refs.toolName
+          ? refs.toolName.replace(/^mcp__/, '').replace(/__/g, '/')
+          : 'MCP'
+        const mcpCall: McpCallShell = {
+          callId: `${scope}-mcp-${toolUseId}`,
+          toolUseId,
+          toolName: refs.toolName || 'MCP',
+          displayName,
+          requestStatus: refs.requestDetailRef ? 'available' : 'missing',
+          responseStatus: refs.responseStatus,
+          ...(refs.requestDetailRef ? { requestDetailRef: refs.requestDetailRef } : {}),
+          ...(refs.responseDetailRef ? { responseDetailRef: refs.responseDetailRef } : {}),
+        }
+        const status = refs.responseStatus === 'error' ? 'failed' : refs.responseStatus === 'missing' ? 'pending' : 'done'
+        const existing = insertionByToolUseId.get(toolUseId)
+        if (existing) {
+          existing.type = 'mcp'
+          existing.mcpCall = mcpCall
+          existing.badgeContent = { toolName: displayName, displayText: displayName }
+          existing.status = status
+          if (agentId) existing.agentId = agentId
+          console.info(`[HistoryService] MCP insertion patched toolUseId=${toolUseId.slice(0, 12)} scope=${scope.slice(0, 24)} status=${refs.responseStatus}`)
+          continue
+        }
+
+        const node = timeline.find((item) => item.toolUseId === toolUseId)
+        insertions.push({
+          id: `${scope}-mcp-${toolUseId}`,
+          type: 'mcp',
+          direction: 'right',
+          color: refs.responseStatus === 'error' ? '#E85858' : '#e6430d',
+          length: 'medium',
+          sessionId: scope,
+          timestamp: node?.parsedAt ?? Date.now(),
+          badgeContent: { toolName: displayName, displayText: displayName },
+          status,
+          isAnimating: false,
+          ...(agentId ? { agentId } : {}),
+          toolUseId,
+          mcpCall,
+        })
+        console.warn(`[HistoryService] MCP insertion synthesized toolUseId=${toolUseId.slice(0, 12)} scope=${scope.slice(0, 24)}`)
+      }
+    }
+
+    for (const session of projection.sessions) {
+      const sessionRanges = new Map<string, { byteStart: number; byteEndExclusive: number; lineEnding?: 'lf' | 'crlf' }>()
+      const sessionMcpLocators = new Map<string, { toolUseId: string; toolName: string; direction: 'request' | 'response'; isError?: boolean }>()
+      for (const node of session.timeline) {
+        const key = `${session.sessionId}:main:${node.id}`
+        const range = byteRangeByNodeId.get(key)
+        const locator = mcpLocatorByNodeId?.get(key)
+        if (range) sessionRanges.set(node.id, range)
+        if (locator) sessionMcpLocators.set(node.id, locator)
+      }
+      processTimeline(session.timeline, session.insertions, path.join(claudeDir, `${session.sessionId}.jsonl`), session.sessionId, sessionRanges, sessionMcpLocators)
+
+      for (const sub of session.subagents) {
+        const subRanges = new Map<string, { byteStart: number; byteEndExclusive: number; lineEnding?: 'lf' | 'crlf' }>()
+        const subMcpLocators = new Map<string, { toolUseId: string; toolName: string; direction: 'request' | 'response'; isError?: boolean }>()
+        for (const node of sub.timeline) {
+          const key = `${session.sessionId}:${sub.agentId}:${node.id}`
+          const range = byteRangeByNodeId.get(key)
+          const locator = mcpLocatorByNodeId?.get(key)
+          if (range) subRanges.set(node.id, range)
+          if (locator) subMcpLocators.set(node.id, locator)
+        }
+        processTimeline(sub.timeline, sub.insertions, path.join(claudeDir, session.sessionId, 'subagents', `agent-${sub.agentId}.jsonl`), `${session.sessionId}:${sub.agentId}`, subRanges, subMcpLocators, sub.agentId)
       }
     }
   }
@@ -166,8 +270,8 @@ export class HistoryService {
       const snapshot = await scanHistoryCatalog(input.projectId, input.projectPath, controller.signal)
       const latestCluster = snapshot.clusters.at(-1) ?? null
       const latestProjection = latestCluster
-        ? await loadHistoryClusterProjection(snapshot, latestCluster.clusterId, controller.signal).then(({ projection, byteRangeByNodeId }) => {
-            this._registerProjectionLocators(projection, byteRangeByNodeId, snapshot.generation, snapshot.claudeDir)
+        ? await loadHistoryClusterProjection(snapshot, latestCluster.clusterId, controller.signal).then(({ projection, byteRangeByNodeId, mcpLocatorByNodeId }) => {
+            this._registerProjectionLocators(projection, byteRangeByNodeId, snapshot.generation, snapshot.claudeDir, mcpLocatorByNodeId)
             return projection
           })
         : null
@@ -259,12 +363,12 @@ export class HistoryService {
       console.info(
         `[HistoryService] hydrate start request=${input.requestId} detail=${input.detailRequestId} generation=${captured.generation} cluster=${input.clusterId.slice(0, 8)}`,
       )
-      const { projection, byteRangeByNodeId } = await loadHistoryClusterProjection(
+      const { projection, byteRangeByNodeId, mcpLocatorByNodeId } = await loadHistoryClusterProjection(
         captured.snapshot,
         captured.clusterId,
         captured.controller.signal,
       )
-      this._registerProjectionLocators(projection, byteRangeByNodeId, captured.generation, captured.snapshot.claudeDir)
+      this._registerProjectionLocators(projection, byteRangeByNodeId, captured.generation, captured.snapshot.claudeDir, mcpLocatorByNodeId)
       const currentDetail = this.detailRequests.get(input.detailRequestId)
       const currentProject = this.requests.get(input.requestId)
       if (
@@ -311,8 +415,8 @@ export class HistoryService {
           code: 'HISTORY_NOT_FOUND',
         })
       }
-      const { projection, byteRangeByNodeId } = await loadHistoryClusterProjection(snapshot, cluster.clusterId, controller.signal)
-      this._registerProjectionLocators(projection, byteRangeByNodeId, snapshot.generation, snapshot.claudeDir)
+      const { projection, byteRangeByNodeId, mcpLocatorByNodeId } = await loadHistoryClusterProjection(snapshot, cluster.clusterId, controller.signal)
+      this._registerProjectionLocators(projection, byteRangeByNodeId, snapshot.generation, snapshot.claudeDir, mcpLocatorByNodeId)
       if (controller.signal.aborted) {
         throw Object.assign(new Error('History session seal cancelled'), { code: 'HISTORY_CANCELLED' })
       }

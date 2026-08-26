@@ -148,6 +148,106 @@ describe('HistoryService detail cancellation', () => {
     })
   })
 
+  it('历史 MCP 注册 request/response 独立 DetailRef，并按 Subagent 作用域生成单个 shell', async () => {
+    const before = snapshot('generation-1', [entry('root')])
+    mocks.scan.mockResolvedValueOnce(before)
+    const mainRequest = {
+      id: 'main-request',
+      sessionId: 'root',
+      type: 'tool_use' as const,
+      toolName: 'mcp__main__query',
+      toolUseId: 'shared-tool-use-id',
+      parsedAt: 1,
+    }
+    const mainResponse = {
+      id: 'main-response',
+      sessionId: 'root',
+      type: 'tool_result' as const,
+      toolUseId: 'shared-tool-use-id',
+      isError: false,
+      parsedAt: 2,
+    }
+    const subRequest = {
+      id: 'sub-request',
+      sessionId: 'root',
+      type: 'tool_use' as const,
+      toolName: 'mcp__sub__query',
+      toolUseId: 'shared-tool-use-id',
+      parsedAt: 3,
+    }
+    const projected: HistoryClusterProjection = {
+      clusterId: 'root',
+      projectedAt: 1,
+      sessions: [{
+        sessionId: 'root',
+        timeline: [mainRequest, mainResponse],
+        insertions: [],
+        milestones: [],
+        gitMarks: [],
+        subagents: [{
+          agentId: 'agent-a',
+          timeline: [subRequest],
+          insertions: [],
+          partialErrors: [],
+        }],
+        triggerNodeIndex: null,
+        partialErrors: [],
+      }],
+    }
+    const ranges = new Map([
+      ['root:main:main-request', { byteStart: 0, byteEndExclusive: 10, lineEnding: 'lf' as const }],
+      ['root:main:main-response', { byteStart: 10, byteEndExclusive: 20, lineEnding: 'lf' as const }],
+      ['root:agent-a:sub-request', { byteStart: 0, byteEndExclusive: 10, lineEnding: 'lf' as const }],
+    ])
+    const locators = new Map([
+      ['root:main:main-request', { toolUseId: 'shared-tool-use-id', toolName: 'mcp__main__query', direction: 'request' as const }],
+      ['root:main:main-response', { toolUseId: 'shared-tool-use-id', toolName: 'mcp__main__query', direction: 'response' as const }],
+      ['root:agent-a:sub-request', { toolUseId: 'shared-tool-use-id', toolName: 'mcp__sub__query', direction: 'request' as const }],
+    ])
+    mocks.loadProjection.mockResolvedValueOnce({
+      projection: projected,
+      byteRangeByNodeId: ranges,
+      mcpLocatorByNodeId: locators,
+    })
+    const registerEntity = vi.fn((entityId: string) => ({
+      detailKey: entityId,
+      revision: 1,
+      sourceGeneration: 'generation-1',
+      estimatedSize: 10,
+    }))
+    const service = new HistoryService({
+      isSessionRunning: () => false,
+      unwatchSession: () => undefined,
+      detailService: { registerEntity } as never,
+    })
+
+    const opened = await service.openProject({ projectId: 'project', projectPath: 'F:\\project', requestId: 'request' })
+
+    expect(opened.ok).toBe(true)
+    if (!opened.ok || !opened.latestProjection) return
+    const mainInsertion = opened.latestProjection.sessions[0].insertions.find(
+      (insertion) => insertion.toolUseId === 'shared-tool-use-id'
+    )
+    const subInsertion = opened.latestProjection.sessions[0].subagents[0].insertions.find(
+      (insertion) => insertion.toolUseId === 'shared-tool-use-id'
+    )
+    expect(mainInsertion?.mcpCall).toMatchObject({
+      toolName: 'mcp__main__query',
+      requestStatus: 'available',
+      responseStatus: 'ready',
+      requestDetailRef: { detailKey: 'mcp:history:root:shared-tool-use-id:request' },
+      responseDetailRef: { detailKey: 'mcp:history:root:shared-tool-use-id:response' },
+    })
+    expect(subInsertion?.mcpCall).toMatchObject({
+      toolName: 'mcp__sub__query',
+      requestStatus: 'available',
+      responseStatus: 'missing',
+      requestDetailRef: { detailKey: 'mcp:history:root:agent-a:shared-tool-use-id:request' },
+    })
+    expect(mainInsertion?.badgeContent).not.toHaveProperty('input')
+    expect(registerEntity).toHaveBeenCalledTimes(3)
+  })
+
   it('Session seal 生成紧凑投影后原子替换 request，并允许既有目录壳继续水合', async () => {
     const before = snapshot('generation-1', [entry('root')])
     const after = snapshot('generation-2', [entry('root'), entry('branch', 'root')])

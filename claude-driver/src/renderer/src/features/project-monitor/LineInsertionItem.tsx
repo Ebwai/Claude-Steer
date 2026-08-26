@@ -9,13 +9,139 @@
 // tool/mcp/cli 类型：紧凑态显示工具名+操作目标，点击展开显示完整详情
 
 import React, { useState } from 'react'
+import { useStore } from 'jotai'
 import type { LineInsertion } from '@shared/types/lineInsertion'
+import type { DetailRef } from '@shared/types/detail'
+import { requestDetail } from '../../capabilities/detailCapability'
+import { useDetailDisclosure } from '../../hooks/useDetailDisclosure'
 import { useT, type TFunction } from '../../i18n'
 import { getHeavyBadgeContent } from '../../business/toolActivityHandler'
 import './LineInsertionItem.css'
 
 interface LineInsertionItemProps {
   insertion: LineInsertion
+}
+
+function McpDetailSection({
+  title,
+  detailRef,
+  status,
+  fallback,
+  color,
+}: {
+  title: string
+  detailRef?: DetailRef
+  status: 'missing' | 'available' | 'pending' | 'ready' | 'empty' | 'error'
+  fallback: string
+  color: string
+}): React.JSX.Element {
+  const store = useStore()
+  const [retryToken, setRetryToken] = useState(0)
+  const disclosure = useDetailDisclosure({
+    detailId: detailRef?.detailKey ?? `mcp-missing-${title}`,
+    fullText: fallback,
+    detailRef,
+  })
+
+  const retry = (event: React.MouseEvent): void => {
+    event.stopPropagation()
+    if (!detailRef) return
+    console.info(`[LineInsertion] MCP ${title} retry key=${detailRef.detailKey}`)
+    setRetryToken((value) => value + 1)
+    void requestDetail(store, detailRef.detailKey, detailRef.revision, detailRef.sourceGeneration)
+  }
+
+  const stateLabel = status === 'pending'
+    ? '等待返回…'
+    : status === 'missing'
+      ? '暂无详情'
+      : disclosure.status === 'loading'
+        ? '加载中…'
+        : disclosure.status === 'error'
+          ? '加载失败'
+          : status === 'empty'
+            ? '返回为空'
+            : '查看详情'
+
+  return (
+    <div className="ins-mcp-section" data-mcp-section={title}>
+      <button
+        type="button"
+        className="ins-mcp-section-toggle"
+        style={{ borderColor: color, color }}
+        disabled={status === 'missing' || status === 'pending'}
+        onClick={disclosure.toggle}
+      >
+        <span>{title}</span>
+        <span>{stateLabel}</span>
+        <span>{disclosure.expanded ? '▲' : '▼'}</span>
+      </button>
+      {disclosure.expanded && (
+        <div className="ins-mcp-section-body" key={retryToken}>
+          {disclosure.status === 'loading' && <div className="ins-badge-tool-detail">加载 MCP {title}…</div>}
+          {disclosure.status === 'error' && (
+            <div className="ins-badge-tool-detail" style={{ color: 'var(--rd)' }}>
+              <div>{disclosure.error ?? `MCP ${title}加载失败`}</div>
+              <button type="button" onClick={retry}>重试</button>
+            </div>
+          )}
+          {disclosure.status === 'ready' && <pre className="ins-mcp-payload">{disclosure.displayText || fallback}</pre>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function McpToolBadge({ insertion, color, isAnimating, status }: {
+  insertion: LineInsertion
+  color: string
+  isAnimating: boolean
+  status: LineInsertion['status']
+}): React.JSX.Element {
+  const mcpCall = insertion.mcpCall
+  const [isExpanded, setIsExpanded] = useState(false)
+  if (!mcpCall) {
+    return <div className="ins-badge" style={{ borderColor: color, color }}>{insertion.badgeContent['toolName'] ?? 'MCP'}</div>
+  }
+
+  const requestFallback = mcpCall.requestStatus === 'missing' ? '请求详情不可用' : '请求详情'
+  const responseFallback = mcpCall.responseStatus === 'pending'
+    ? '等待 MCP 返回内容'
+    : mcpCall.responseStatus === 'missing'
+      ? '返回详情不可用'
+      : mcpCall.responseStatus === 'empty'
+        ? 'null / 空返回'
+        : '返回详情'
+
+  return (
+    <div className="ins-badge ins-badge-tool expanded" style={{ borderColor: color }}>
+      <div className="ins-badge-tool-header" onClick={() => setIsExpanded((value) => !value)}>
+        <span className="ins-badge-tool" style={{ color }}>{mcpCall.toolName}</span>
+        <span className="ins-badge-desc">{isExpanded ? '收起 MCP 详情' : '请求 / 返回'}</span>
+        {isAnimating && <span className="ins-spinner">⟳</span>}
+        {status === 'failed' && <span className="ins-fail">✕</span>}
+        <span className="ins-badge-expand" style={{ color }}>{isExpanded ? '▲' : '▼'}</span>
+      </div>
+      {isExpanded && (
+        <div className="ins-mcp-sections" onClick={(event) => event.stopPropagation()}>
+          <McpDetailSection
+            title="请求"
+            detailRef={mcpCall.requestDetailRef}
+            status={mcpCall.requestStatus}
+            fallback={requestFallback}
+            color={color}
+          />
+          <McpDetailSection
+            title="返回"
+            detailRef={mcpCall.responseDetailRef}
+            status={mcpCall.responseStatus}
+            fallback={responseFallback}
+            color={color}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 // 约 50 个字（9px 字体，每字约 9px）= 450px，badge 宽 320px 内容区约容纳 50 字
@@ -524,6 +650,16 @@ function LineInsertionItem({ insertion }: LineInsertionItemProps): React.JSX.Ele
   // ── 工具 badge（tool / mcp / cli 类型） ──
   const buildToolBadge = (): React.ReactNode => {
     const actualToolName = badgeContent['toolName'] ?? ''
+    if (type === 'mcp' && insertion.mcpCall) {
+      return (
+        <McpToolBadge
+          insertion={insertion}
+          color={color}
+          isAnimating={isAnimating}
+          status={status}
+        />
+      )
+    }
     const compactText = buildToolCompact(actualToolName, badgeContent, t)
     const hasDetail = hasToolDetail(actualToolName, badgeContent)
 

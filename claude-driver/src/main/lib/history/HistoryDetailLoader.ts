@@ -73,13 +73,57 @@ function projectRecord(
   }
 }
 
-interface TimelineProjectionResult {
+export type HistoryByteRange = {
+  byteStart: number
+  byteEndExclusive: number
+  lineEnding: 'lf' | 'crlf'
+}
+
+export interface McpLocatorInfo {
+  toolUseId: string
+  toolName: string
+  direction: 'request' | 'response'
+  isError?: boolean
+}
+
+export interface TimelineProjectionResult {
   timeline: HistoryTimelineNode[]
   visibleIndexByUuid: Map<string, number>
   errors: string[]
-  /** nodeId → JSONL 文件内 byte 范围（供 HistoryService 注册 EntityLocator） */
-  byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number }>
+  /** scope/nodeId → JSONL 文件内 byte 范围（供 HistoryService 注册 EntityLocator） */
+  byteRangeByNodeId: Map<string, HistoryByteRange>
+  /** scope/nodeId → MCP 方向信息；完整内容仍只由 DetailService 按 locator 读取 */
+  mcpLocatorByNodeId: Map<string, McpLocatorInfo>
 }
+
+function scopedNodeKey(sessionId: string, nodeId: string, agentId?: string): string {
+  return `${sessionId}:${agentId ?? 'main'}:${nodeId}`
+}
+
+async function detectLineEnding(filePath: string): Promise<'lf' | 'crlf'> {
+  const prefixSize = 0xffff
+  let fileHandle: fs.promises.FileHandle | undefined
+  try {
+    fileHandle = await fs.promises.open(filePath, 'r')
+    const sample = Buffer.alloc(prefixSize)
+    const { bytesRead } = await fileHandle.read(sample, 0, sample.length, 0)
+    for (let index = 0; index < bytesRead; index++) {
+      if (sample[index] === 0x0a) {
+        return index > 0 && sample[index - 1] === 0x0d ? 'crlf' : 'lf'
+      }
+    }
+  } catch (error) {
+    console.warn(`[HistoryProjection] line ending detection failed file=${path.basename(filePath)} error=${String(error)}`)
+  } finally {
+    try {
+      await fileHandle?.close()
+    } catch (error) {
+      console.warn(`[HistoryProjection] line ending handle close failed file=${path.basename(filePath)} error=${String(error)}`)
+    }
+  }
+  return 'lf'
+}
+
 
 async function readHistoryTimeline(
   filePath: string,
@@ -89,8 +133,16 @@ async function readHistoryTimeline(
 ): Promise<TimelineProjectionResult> {
   const timeline: HistoryTimelineNode[] = []
   const visibleIndexByUuid = new Map<string, number>()
-  const byteRangeByNodeId = new Map<string, { byteStart: number; byteEndExclusive: number }>()
+  const byteRangeByNodeId = new Map<string, HistoryByteRange>()
+  const mcpLocatorByNodeId = new Map<string, McpLocatorInfo>()
   const errors: string[] = []
+  const detectedLineEnding = await detectLineEnding(filePath)
+  let fileSize = 0
+  try {
+    fileSize = (await fs.promises.stat(filePath)).size
+  } catch (error) {
+    console.warn(`[HistoryProjection] file size detection failed file=${path.basename(filePath)} error=${String(error)}`)
+  }
   const stream = fs.createReadStream(filePath)
   const reader = readline.createInterface({ input: stream, crlfDelay: Infinity })
   let pendingSnapshotStart = false
@@ -99,9 +151,6 @@ async function readHistoryTimeline(
   let fallbackCandidateIndex: number | null = null
   let visibleNodeCount = 0
   let lineNumber = 0
-
-  // 字节追踪：基于 readline 行内容计算，不用 stream.on('data')（readline 和 data 事件时序不同步）
-  // 初始偏移：检测 UTF-8 BOM（readline 会剥离 BOM，但字节仍占据位置）
   let currentByteOffset = 0
   let bomChecked = false
 
@@ -110,8 +159,6 @@ async function readHistoryTimeline(
       lineNumber++
       throwIfAborted(signal)
 
-      // 首行检测 BOM：如果文件以 UTF-8 BOM 开头，readline 剥离后 line 不含 BOM，
-      // 但 BOM 的 3 字节占据文件位置
       if (!bomChecked) {
         bomChecked = true
         try {
@@ -119,26 +166,28 @@ async function readHistoryTimeline(
           const fd = fs.openSync(filePath, 'r')
           fs.readSync(fd, head, 0, 3, 0)
           fs.closeSync(fd)
-          if (head[0] === 0xEF && head[1] === 0xBB && head[2] === 0xBF) {
-            currentByteOffset = 3
-          }
-        } catch { /* 忽略 BOM 检测失败 */ }
+          if (head[0] === 0xEF && head[1] === 0xBB && head[2] === 0xBF) currentByteOffset = 3
+        } catch (error) {
+          console.warn(`[HistoryProjection] BOM detection failed file=${path.basename(filePath)} error=${String(error)}`)
+        }
       }
 
+      const normalizedLine = lineNumber === 1 ? line.replace(/^﻿/, '') : line
+      const lineBytes = Buffer.byteLength(normalizedLine, 'utf-8')
+      const byteStart = currentByteOffset
+      const expectedLineEnd = currentByteOffset + lineBytes
+      const hasLineEnding = expectedLineEnd < fileSize
+      const lineEndingBytes = hasLineEnding ? (detectedLineEnding === 'crlf' ? 2 : 1) : 0
+      const byteEndExclusive = byteStart + lineBytes + lineEndingBytes
+
       if (!line.trim()) {
-        // 空行：推进字节偏移（1 for LF, 2 for CRLF — crlfDelay 合并为 LF）
-        currentByteOffset += 1
+        currentByteOffset = byteEndExclusive
         continue
       }
 
-      // 基于行内容计算字节范围（readline 剥离行尾，JSONL 用 LF）
-      const lineBytes = Buffer.byteLength(line, 'utf-8')
-      const byteStart = currentByteOffset
-      const byteEndExclusive = byteStart + lineBytes + 1 // +1 for LF
-
       let raw: Record<string, unknown>
       try {
-        const parsed = JSON.parse(line) as unknown
+        const parsed = JSON.parse(normalizedLine) as unknown
         if (typeof parsed !== 'object' || parsed === null) {
           currentByteOffset = byteEndExclusive
           continue
@@ -187,10 +236,32 @@ async function readHistoryTimeline(
           ) {
             fallbackCandidateIndex = timeline.length
           }
-          // 记录有文本的节点字节范围（user_input/assistant/tool_result）
-          if (node.text !== undefined) {
-            byteRangeByNodeId.set(node.id, { byteStart, byteEndExclusive })
+
+          byteRangeByNodeId.set(scopedNodeKey(sessionId, node.id, agentId), {
+            byteStart,
+            byteEndExclusive,
+            lineEnding: detectedLineEnding,
+          })
+
+          if (record.type === 'tool_use' && record.toolUse && isMcpToolName(record.toolUse.name)) {
+            mcpLocatorByNodeId.set(scopedNodeKey(sessionId, node.id, agentId), {
+              toolUseId: record.toolUse.id,
+              toolName: record.toolUse.name,
+              direction: 'request',
+            })
+          } else if (record.type === 'tool_result' && record.toolResult) {
+            // tool_result 没有工具名；先保留行定位，待扫描结束后按 tool_use_id 判定 MCP。
+            const toolUseId = record.toolResult.tool_use_id
+            if (typeof toolUseId === 'string' && toolUseId.length > 0) {
+              mcpLocatorByNodeId.set(scopedNodeKey(sessionId, node.id, agentId), {
+                toolUseId,
+                toolName: '',
+                direction: 'response',
+                isError: record.toolResult.is_error ?? false,
+              })
+            }
           }
+
           timeline.push(node)
           if (node.type === 'user_input' || node.type === 'assistant') visibleNodeCount++
         }
@@ -212,7 +283,27 @@ async function readHistoryTimeline(
     reader.close()
     stream.destroy()
   }
-  return { timeline, visibleIndexByUuid, errors, byteRangeByNodeId }
+  const mcpToolNamesByUseId = new Map<string, string>()
+  for (const locator of mcpLocatorByNodeId.values()) {
+    if (locator.direction === 'request' && isMcpToolName(locator.toolName)) {
+      mcpToolNamesByUseId.set(locator.toolUseId, locator.toolName)
+    }
+  }
+  for (const [nodeId, locator] of mcpLocatorByNodeId) {
+    if (locator.direction === 'response' && !mcpToolNamesByUseId.has(locator.toolUseId)) {
+      mcpLocatorByNodeId.delete(nodeId)
+      continue
+    }
+    if (locator.direction === 'response') locator.toolName = mcpToolNamesByUseId.get(locator.toolUseId) ?? ''
+  }
+  console.info(
+    `[HistoryProjection] timeline scanned session=${sessionId.slice(0, 8)} agent=${agentId ?? 'main'} nodes=${timeline.length} mcpLocators=${mcpLocatorByNodeId.size} lineEnding=${detectedLineEnding}`
+  )
+  return { timeline, visibleIndexByUuid, errors, byteRangeByNodeId, mcpLocatorByNodeId }
+}
+
+function isMcpToolName(toolName: unknown): toolName is string {
+  return typeof toolName === 'string' && toolName.startsWith('mcp__')
 }
 
 async function readJsonLines<T>(
@@ -278,11 +369,17 @@ async function replayInsertions(
   }
 }
 
+interface SubagentProjectionResult {
+  projection: HistorySubagentProjection
+  byteRangeByNodeId: Map<string, HistoryByteRange>
+  mcpLocatorByNodeId: Map<string, McpLocatorInfo>
+}
+
 async function loadSubagentProjections(
   claudeDir: string,
   sessionId: string,
   signal?: AbortSignal
-): Promise<HistorySubagentProjection[]> {
+): Promise<SubagentProjectionResult[]> {
   const subagentsDir = path.join(claudeDir, sessionId, 'subagents')
   let names: string[]
   try {
@@ -291,28 +388,23 @@ async function loadSubagentProjections(
     return []
   }
   const transcriptNames = names.filter(
-    (name) =>
-      name.startsWith('agent-') && name.endsWith('.jsonl') && !name.endsWith('.insertions.jsonl')
+    (name) => name.startsWith('agent-') && name.endsWith('.jsonl') && !name.endsWith('.insertions.jsonl')
   )
-  const results: HistorySubagentProjection[] = []
+  const results: SubagentProjectionResult[] = []
   for (const name of transcriptNames) {
     throwIfAborted(signal)
     const agentId = name.slice('agent-'.length, -'.jsonl'.length)
-    const transcript = await readHistoryTimeline(
-      path.join(subagentsDir, name),
-      sessionId,
-      signal,
-      agentId
-    )
-    const insertions = await replayInsertions(
-      path.join(subagentsDir, `agent-${agentId}.insertions.jsonl`),
-      signal
-    )
+    const transcript = await readHistoryTimeline(path.join(subagentsDir, name), sessionId, signal, agentId)
+    const insertions = await replayInsertions(path.join(subagentsDir, `agent-${agentId}.insertions.jsonl`), signal)
     results.push({
-      agentId,
-      timeline: transcript.timeline,
-      insertions: insertions.values,
-      partialErrors: [...transcript.errors, ...insertions.errors]
+      projection: {
+        agentId,
+        timeline: transcript.timeline,
+        insertions: insertions.values,
+        partialErrors: [...transcript.errors, ...insertions.errors]
+      },
+      byteRangeByNodeId: transcript.byteRangeByNodeId,
+      mcpLocatorByNodeId: transcript.mcpLocatorByNodeId,
     })
   }
   return results
@@ -322,7 +414,11 @@ export async function loadHistoryClusterProjection(
   snapshot: HistoryCatalogSnapshot,
   clusterId: string,
   signal?: AbortSignal
-): Promise<{ projection: HistoryClusterProjection; byteRangeByNodeId: Map<string, { byteStart: number; byteEndExclusive: number }> }> {
+): Promise<{
+  projection: HistoryClusterProjection
+  byteRangeByNodeId: Map<string, HistoryByteRange>
+  mcpLocatorByNodeId: Map<string, McpLocatorInfo>
+}> {
   const cluster = snapshot.clusters.find((item) => item.clusterId === clusterId)
   if (!cluster) {
     throw Object.assign(new Error(`History cluster not found: ${clusterId}`), {
@@ -332,40 +428,30 @@ export async function loadHistoryClusterProjection(
 
   const projections: HistorySessionProjection[] = []
   const visibleIndexesBySession = new Map<string, Map<string, number>>()
-  const allByteRanges = new Map<string, { byteStart: number; byteEndExclusive: number }>()
+  const allByteRanges = new Map<string, HistoryByteRange>()
+  const allMcpLocators = new Map<string, McpLocatorInfo>()
   for (const entry of cluster.sessions) {
     throwIfAborted(signal)
     const transcriptPath = path.join(snapshot.claudeDir, `${entry.sessionId}.jsonl`)
-    const [transcript, insertions, milestones, gitMarks, resources, subagents] = await Promise.all([
+    const [transcript, insertions, milestones, gitMarks, resources, subagentResults] = await Promise.all([
       readHistoryTimeline(transcriptPath, entry.sessionId, signal),
-      replayInsertions(
-        path.join(snapshot.claudeDir, `${entry.sessionId}.insertions.jsonl`),
-        signal
-      ),
-      readJsonLines<Milestone>(
-        path.join(snapshot.claudeDir, `${entry.sessionId}.milestones.jsonl`),
-        signal
-      ),
-      readJsonLines<GitMark>(
-        path.join(snapshot.claudeDir, `${entry.sessionId}.git-marks.jsonl`),
-        signal
-      ),
-      readJsonLines<ResourceMessageSnapshot>(
-        path.join(snapshot.claudeDir, `${entry.sessionId}.resources.jsonl`),
-        signal
-      ),
+      replayInsertions(path.join(snapshot.claudeDir, `${entry.sessionId}.insertions.jsonl`), signal),
+      readJsonLines<Milestone>(path.join(snapshot.claudeDir, `${entry.sessionId}.milestones.jsonl`), signal),
+      readJsonLines<GitMark>(path.join(snapshot.claudeDir, `${entry.sessionId}.git-marks.jsonl`), signal),
+      readJsonLines<ResourceMessageSnapshot>(path.join(snapshot.claudeDir, `${entry.sessionId}.resources.jsonl`), signal),
       loadSubagentProjections(snapshot.claudeDir, entry.sessionId, signal)
     ])
-    const resourcesByUuid = new Map(
-      resources.values.map((item) => [item.userMessageUuid, item.resources])
-    )
+    const resourcesByUuid = new Map(resources.values.map((item) => [item.userMessageUuid, item.resources]))
     for (const node of transcript.timeline) {
       const attached = resourcesByUuid.get(node.id)
       if (attached?.length) node.resources = attached
     }
-    // 合并主时间线字节范围
-    for (const [nodeId, range] of transcript.byteRangeByNodeId) {
-      allByteRanges.set(nodeId, range)
+    for (const [nodeId, range] of transcript.byteRangeByNodeId) allByteRanges.set(nodeId, range)
+    for (const [nodeId, locator] of transcript.mcpLocatorByNodeId) allMcpLocators.set(nodeId, locator)
+    const subagents = subagentResults.map((item) => item.projection)
+    for (const result of subagentResults) {
+      for (const [nodeId, range] of result.byteRangeByNodeId) allByteRanges.set(nodeId, range)
+      for (const [nodeId, locator] of result.mcpLocatorByNodeId) allMcpLocators.set(nodeId, locator)
     }
     visibleIndexesBySession.set(entry.sessionId, transcript.visibleIndexByUuid)
     projections.push({
@@ -376,13 +462,7 @@ export async function loadHistoryClusterProjection(
       gitMarks: gitMarks.values,
       subagents,
       triggerNodeIndex: null,
-      partialErrors: [
-        ...transcript.errors,
-        ...insertions.errors,
-        ...milestones.errors,
-        ...gitMarks.errors,
-        ...resources.errors
-      ]
+      partialErrors: [...transcript.errors, ...insertions.errors, ...milestones.errors, ...gitMarks.errors, ...resources.errors]
     })
   }
 
@@ -390,47 +470,23 @@ export async function loadHistoryClusterProjection(
   for (const entry of cluster.sessions) {
     if (!entry.parentSessionId || !entry.forkMessageUuid) continue
     const child = projectionsById.get(entry.sessionId)
-    if (child) {
-      child.triggerNodeIndex =
-        visibleIndexesBySession.get(entry.parentSessionId)?.get(entry.forkMessageUuid) ?? null
-    }
+    if (child) child.triggerNodeIndex = visibleIndexesBySession.get(entry.parentSessionId)?.get(entry.forkMessageUuid) ?? null
   }
 
   const nodeCount = projections.reduce(
-    (total, item) =>
-      total +
-      item.timeline.length +
-      item.subagents.reduce((n, subagent) => n + subagent.timeline.length, 0),
+    (total, item) => total + item.timeline.length + item.subagents.reduce((n, subagent) => n + subagent.timeline.length, 0),
     0
   )
   const partialCount = projections.reduce((total, item) => total + item.partialErrors.length, 0)
-  const projection: HistoryClusterProjection = {
-    clusterId,
-    sessions: projections,
-    projectedAt: Date.now()
-  }
+  const projection: HistoryClusterProjection = { clusterId, sessions: projections, projectedAt: Date.now() }
   const estimatedBytes = projections.reduce((total, session) => {
     const timelines = [session.timeline, ...session.subagents.map((subagent) => subagent.timeline)]
-    const timelineBytes = timelines
-      .flat()
-      .reduce(
-        (bytes, node) =>
-          bytes +
-          96 +
-          Buffer.byteLength(node.text ?? '') +
-          Buffer.byteLength(node.toolDisplayText ?? ''),
-        0
-      )
-    return (
-      total +
-      timelineBytes +
-      session.insertions.length * 128 +
-      session.milestones.length * 96 +
-      session.gitMarks.length * 96
+    const timelineBytes = timelines.flat().reduce(
+      (bytes, node) => bytes + 96 + Buffer.byteLength(node.text ?? '') + Buffer.byteLength(node.toolDisplayText ?? ''),
+      0
     )
+    return total + timelineBytes + session.insertions.length * 128 + session.milestones.length * 96 + session.gitMarks.length * 96
   }, 0)
-  console.info(
-    `[HistoryProjection] cluster=${clusterId.slice(0, 8)} sessions=${projections.length} nodes=${nodeCount} partialErrors=${partialCount} estimatedBytes=${estimatedBytes}`
-  )
-  return { projection, byteRangeByNodeId: allByteRanges }
+  console.info(`[HistoryProjection] cluster=${clusterId.slice(0, 8)} sessions=${projections.length} nodes=${nodeCount} mcpLocators=${allMcpLocators.size} partialErrors=${partialCount} estimatedBytes=${estimatedBytes}`)
+  return { projection, byteRangeByNodeId: allByteRanges, mcpLocatorByNodeId: allMcpLocators }
 }
