@@ -120,6 +120,7 @@
   color: var(--tx3);
 }
 
+.sfn-bottom-btn,
 .sfn-delete-btn {
   width: 24px;
   height: 24px;
@@ -128,9 +129,19 @@
   border-radius: 4px;
   background: transparent;
   color: var(--tx3);
-  font-size: 18px;
   line-height: 20px;
   cursor: pointer;
+}
+
+.sfn-bottom-btn {
+  font-size: 16px;
+}
+
+.sfn-bottom-btn:hover,
+.sfn-bottom-btn:focus-visible {
+  color: var(--or);
+  border-color: rgba(218, 119, 86, 0.55);
+  background: rgba(218, 119, 86, 0.08);
 }
 
 .sfn-delete-btn:hover:not(:disabled) {

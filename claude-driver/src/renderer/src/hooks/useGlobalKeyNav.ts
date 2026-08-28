@@ -40,7 +40,26 @@ export function useGlobalKeyNav(
   const store = useStore()
   const multiTapStateRef = useRef<ArrowMultiTapState>(IDLE_ARROW_MULTI_TAP_STATE)
   const multiTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const multiTapTimerElapsedRef = useRef(false)
   const commitTransitionRef = useRef<(transition: ArrowMultiTapTransition) => void>(() => undefined)
+  // KeyboardEvent.timeStamp 在不同 Chromium/浏览器实现中可能使用不同时间原点。
+  // 首次事件建立与 performance.now() 的偏移，后续用事件发生时刻判断 200ms 窗口。
+  const eventTimeOriginOffsetRef = useRef<number | null>(null)
+
+  const getEventTime = useCallback((event: KeyboardEvent): number => {
+    const eventTimestamp = event.timeStamp
+    if (!Number.isFinite(eventTimestamp) || eventTimestamp <= 0) return performance.now()
+    const currentTime = performance.now()
+    const offset = eventTimeOriginOffsetRef.current
+    if (offset === null) {
+      eventTimeOriginOffsetRef.current = currentTime - eventTimestamp
+      return currentTime
+    }
+    const normalized = eventTimestamp + offset
+    // 系统时间源切换或测试环境伪造 timestamp 时回退执行时间，避免错误地延长候选。
+    if (!Number.isFinite(normalized) || Math.abs(normalized - currentTime) > 60_000) return currentTime
+    return normalized
+  }, [])
 
   const moveVertical = useCallback((key: VerticalArrowKey): void => {
     const focusedId = store.get(focusedSessionIdAtom) ?? layouts[0]?.sessionId
@@ -102,6 +121,7 @@ export function useGlobalKeyNav(
       clearTimeout(multiTapTimerRef.current)
       multiTapTimerRef.current = null
     }
+    multiTapTimerElapsedRef.current = false
     multiTapStateRef.current = transition.state
     executeActions(transition.actions)
     if (transition.reason !== 'repeat' && transition.reason !== 'unmatched-keyup') {
@@ -113,10 +133,12 @@ export function useGlobalKeyNav(
     const delay = Math.max(0, deadline - performance.now() + 1)
     multiTapTimerRef.current = setTimeout(() => {
       multiTapTimerRef.current = null
-      commitTransitionRef.current(transitionArrowMultiTap(multiTapStateRef.current, {
-        type: 'timeout',
-        now: performance.now(),
-      }))
+      // 这是调度兜底而不是物理按键结论：Renderer 忙碌时 keyup 可能已经发生，
+      // 但事件回调尚未执行。先标记到期，下一条真实键盘事件再按物理时间裁决。
+      multiTapTimerElapsedRef.current = true
+      if (multiTapStateRef.current.phase !== 'idle') {
+        console.debug(`[KeyNav] multi-tap timer elapsed phase=${multiTapStateRef.current.phase}; awaiting event timestamp`)
+      }
     }, delay)
   }, [executeActions])
   useEffect(() => {
@@ -129,6 +151,17 @@ export function useGlobalKeyNav(
       type: 'interrupt',
       flushPending,
     }))
+  }, [commitTransition])
+
+  const reconcileElapsedTimer = useCallback((now: number): void => {
+    if (!multiTapTimerElapsedRef.current) return
+    const deadline = arrowMultiTapDeadline(multiTapStateRef.current)
+    if (deadline !== null && now > deadline) {
+      commitTransition(transitionArrowMultiTap(multiTapStateRef.current, {
+        type: 'timeout',
+        now,
+      }))
+    }
   }, [commitTransition])
 
   const handleKeyDown = useCallback((event: KeyboardEvent): void => {
@@ -156,17 +189,19 @@ export function useGlobalKeyNav(
 
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       event.preventDefault()
+      const eventTime = getEventTime(event)
+      reconcileElapsedTimer(eventTime)
       commitTransition(transitionArrowMultiTap(multiTapStateRef.current, {
         type: 'keydown',
         key: event.key,
         repeat: event.repeat,
-        now: performance.now(),
+        now: eventTime,
       }))
       return
     }
 
     interruptCandidate(false)
-  }, [commitTransition, focusSession, interruptCandidate, layouts, store])
+  }, [commitTransition, focusSession, getEventTime, interruptCandidate, layouts, reconcileElapsedTimer, store])
 
   const handleKeyUp = useCallback((event: KeyboardEvent): void => {
     if (isEditableTarget(event.target)) {
@@ -175,12 +210,14 @@ export function useGlobalKeyNav(
     }
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
     event.preventDefault()
+    const eventTime = getEventTime(event)
+    reconcileElapsedTimer(eventTime)
     commitTransition(transitionArrowMultiTap(multiTapStateRef.current, {
       type: 'keyup',
       key: event.key,
-      now: performance.now(),
+      now: eventTime,
     }))
-  }, [commitTransition, interruptCandidate])
+  }, [commitTransition, getEventTime, interruptCandidate, reconcileElapsedTimer])
 
   useEffect(() => {
     const handleBlur = (): void => interruptCandidate(false)
@@ -197,6 +234,7 @@ export function useGlobalKeyNav(
   useEffect(() => {
     if (multiTapTimerRef.current) clearTimeout(multiTapTimerRef.current)
     multiTapTimerRef.current = null
+    multiTapTimerElapsedRef.current = false
     multiTapStateRef.current = IDLE_ARROW_MULTI_TAP_STATE
     console.debug(`[KeyNav] multi-tap reset reason=scope-change scope=${scopeKey ?? 'none'}`)
   }, [scopeKey])
@@ -204,6 +242,7 @@ export function useGlobalKeyNav(
   useEffect(() => () => {
     if (multiTapTimerRef.current) clearTimeout(multiTapTimerRef.current)
     multiTapTimerRef.current = null
+    multiTapTimerElapsedRef.current = false
     multiTapStateRef.current = IDLE_ARROW_MULTI_TAP_STATE
   }, [])
 }

@@ -66,9 +66,14 @@ describe('useGlobalKeyNav double tap integration', () => {
     key: string,
     type: 'keydown' | 'keyup',
     repeat = false,
-    target: Window | HTMLElement = window
+    target: Window | HTMLElement = window,
+    timestamp?: number,
   ): void {
-    target.dispatchEvent(new KeyboardEvent(type, { key, repeat, bubbles: true, cancelable: true }))
+    const event = new KeyboardEvent(type, { key, repeat, bubbles: true, cancelable: true })
+    if (timestamp !== undefined) {
+      Object.defineProperty(event, 'timeStamp', { configurable: true, value: timestamp })
+    }
+    target.dispatchEvent(event)
   }
 
   it('keeps the first jump immediate and replaces only the second jump with a bottom edge intent', () => {
@@ -106,6 +111,63 @@ describe('useGlobalKeyNav double tap integration', () => {
     })
     expect(store.get(cursorNodeIndexAtom('agent'))).toBe(-1)
     expect(focusSessionEdge).not.toHaveBeenCalled()
+  })
+
+  it('uses physical event timestamps when the renderer timer runs before delayed keyup delivery', () => {
+    const { store, focusSessionEdge } = createHarness()
+    act(() => dispatch('ArrowUp', 'keydown', false, window, 1000))
+    act(() => dispatch('ArrowUp', 'keyup', false, window, 1050))
+    act(() => vi.advanceTimersByTime(250))
+    act(() => dispatch('ArrowUp', 'keydown', false, window, 1100))
+    act(() => dispatch('ArrowUp', 'keyup', false, window, 1150))
+
+    expect(store.get(cursorNodeIndexAtom('agent'))).toBe(2)
+    expect(focusSessionEdge).toHaveBeenCalledWith('agent', 'top', 'keyboard-double-tap')
+  })
+
+  it('keeps a physically long first press invalid even when keyup delivery is delayed', () => {
+    const { store, focusSessionEdge } = createHarness()
+    act(() => dispatch('ArrowDown', 'keydown', false, window, 1000))
+    act(() => vi.advanceTimersByTime(250))
+    act(() => dispatch('ArrowDown', 'keyup', false, window, 1250))
+
+    expect(store.get(cursorNodeIndexAtom('agent'))).toBe(0)
+    expect(focusSessionEdge).not.toHaveBeenCalled()
+  })
+
+  it('keeps a physically valid second press after the waiting timer has elapsed', () => {
+    const { store, focusSessionEdge } = createHarness()
+    act(() => dispatch('ArrowDown', 'keydown', false, window, 1000))
+    act(() => dispatch('ArrowDown', 'keyup', false, window, 1050))
+    act(() => vi.advanceTimersByTime(300))
+    act(() => dispatch('ArrowDown', 'keydown', false, window, 1100))
+    act(() => dispatch('ArrowDown', 'keyup', false, window, 1150))
+
+    expect(store.get(cursorNodeIndexAtom('agent'))).toBe(0)
+    expect(focusSessionEdge).toHaveBeenCalledWith('agent', 'bottom', 'keyboard-double-tap')
+  })
+
+  it('rejects a physically late second press even when its callback is delayed', () => {
+    const { focusSessionEdge } = createHarness()
+    act(() => dispatch('ArrowDown', 'keydown', false, window, 1000))
+    act(() => dispatch('ArrowDown', 'keyup', false, window, 1050))
+    act(() => vi.advanceTimersByTime(300))
+    act(() => dispatch('ArrowDown', 'keydown', false, window, 1300))
+    act(() => dispatch('ArrowDown', 'keyup', false, window, 1350))
+
+    expect(focusSessionEdge).not.toHaveBeenCalled()
+  })
+
+  it('falls back to renderer time when the event timestamp is unusable', () => {
+    const { focusSessionEdge } = createHarness()
+    act(() => dispatch('ArrowDown', 'keydown', false, window, 0))
+    act(() => vi.advanceTimersByTime(50))
+    act(() => dispatch('ArrowDown', 'keyup', false, window, 0))
+    act(() => vi.advanceTimersByTime(50))
+    act(() => dispatch('ArrowDown', 'keydown', false, window, 0))
+    act(() => dispatch('ArrowDown', 'keyup', false, window, 0))
+
+    expect(focusSessionEdge).toHaveBeenCalledWith('agent', 'bottom', 'keyboard-double-tap')
   })
 
   it('clears a candidate on project scope change', () => {

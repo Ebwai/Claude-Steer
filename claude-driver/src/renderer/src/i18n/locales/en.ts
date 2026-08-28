@@ -187,6 +187,7 @@ const en: Record<string, string> = {
   'projectMonitor.canvas.noRunningSession': 'No running sessions for this project',
   'projectMonitor.canvas.processLineHint': 'Process line will appear here after starting a project from global monitor',
   'projectMonitor.canvas.terminalTitle': 'Terminal — {{label}}',
+  'projectMonitor.canvas.jumpToBottom': 'Jump to bottom',
   'projectMonitor.canvas.contextWindowUsage': 'Current context window usage',
   'projectMonitor.canvas.sessionTokenTotal': 'Total tokens consumed this session',
   'projectMonitor.canvas.interruptTooltip': 'Send Ctrl+C interrupt signal to this session',

@@ -40,6 +40,7 @@ export interface SessionFrameData extends Record<string, unknown> {
   /** 稳定 ref gate：相机移动/settling 期间冻结高度提交，但不改变 node.data 引用。 */
   layoutMeasurementGate: HistoryLayoutMeasurementGate
   onRequestDelete?: (sessionId: string) => void
+  onFocusBottom?: (sessionId: string) => void
   agentLabel: string
   agentColor: string   // CSS 颜色值，如 '#35C98A'
   isExpanded: boolean
@@ -284,6 +285,20 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
             </span>
           )}
           <span className="sfn-duration">{formatDuration(startedAt, session?.endedAt ?? null)}</span>
+          <button
+            type="button"
+            className="sfn-bottom-btn"
+            title={t('projectMonitor.canvas.jumpToBottom')}
+            aria-label={t('projectMonitor.canvas.jumpToBottom')}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              console.info(`[SessionFrameNode] bottom navigation requested session=${sessionId.slice(0, 8)}`)
+              data.onFocusBottom?.(sessionId)
+            }}
+          >
+            ↓
+          </button>
           {source === 'history' && (
             <button
               type="button"

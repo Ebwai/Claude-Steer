@@ -342,6 +342,8 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
         isDeleting: deleting,
         layoutMeasurementGate,
         onRequestDelete: handleRequestDelete,
+        onFocusBottom: (targetSessionId) =>
+          focusSessionEdge(targetSessionId, 'bottom', 'header-bottom-button'),
         agentLabel: agentLabels.get(sessionId) ?? (source === 'history' ? historyLabel : idx === 0 ? t('projectMonitor.canvas.mainLine') : `Agent${idx + 1}`),
         agentColor: AGENT_COLORS[idx % AGENT_COLORS.length],
         isExpanded: true,
@@ -357,7 +359,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
         style: { width: FRAME_WIDTH },
       } as Node
     }).filter((node): node is Node => node !== null)
-  }, [layouts, heightsMap, sessionViewById, relationsMap, deleteStates, handleRequestDelete, layoutMeasurementGate, agentLabels, projectId, t])
+  }, [layouts, heightsMap, sessionViewById, relationsMap, deleteStates, handleRequestDelete, layoutMeasurementGate, agentLabels, projectId, focusSessionEdge, t])
 
   // ── 构建 branch Edge 列表（情形2）─────────────────────────────────────────
   // sourceHandle/targetHandle 对应 SessionFrameNode 内动态注册的 Handle id

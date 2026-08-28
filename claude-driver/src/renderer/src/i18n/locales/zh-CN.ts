@@ -187,6 +187,7 @@ const zhCN: Record<string, string> = {
   'projectMonitor.canvas.noRunningSession': '该项目暂无运行中的 Session',
   'projectMonitor.canvas.processLineHint': '在全局监控页面启动项目后进程线将显示在此',
   'projectMonitor.canvas.terminalTitle': '终端 — {{label}}',
+  'projectMonitor.canvas.jumpToBottom': '跳转到底部',
   'projectMonitor.canvas.contextWindowUsage': '当前上下文窗口已用量',
   'projectMonitor.canvas.sessionTokenTotal': '本次会话 token 总消耗',
   'projectMonitor.canvas.interruptTooltip': '向该 Session 发送 Ctrl+C 中断信号',
