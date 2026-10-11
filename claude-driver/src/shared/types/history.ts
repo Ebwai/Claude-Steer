@@ -8,7 +8,7 @@ import type { GitMark, Milestone } from './index'
 import type { ResourceSnapshot } from './resources'
 
 
-export type HistoryDetailsState = 'shell' | 'hydrating' | 'resident' | 'error'
+export type HistoryDetailsState = 'shell' | 'hydrating' | 'resident' | 'error' | 'unavailable'
 
 export interface HistorySidecarFlags {
   meta: boolean
@@ -139,6 +139,8 @@ export interface HistorySubagentProjection {
 
 export interface HistorySessionProjection {
   sessionId: string
+  /** Catalog entry survived, but the transcript file is no longer present. */
+  transcriptMissing?: boolean
   timeline: HistoryTimelineNode[]
   insertions: LineInsertion[]
   milestones: Milestone[]

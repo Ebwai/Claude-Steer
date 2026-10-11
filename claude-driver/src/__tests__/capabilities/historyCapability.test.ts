@@ -19,6 +19,8 @@ import { timelineBySessionAtom } from '@renderer/atoms/timeline.atom'
 import { tokenInventoryAtom } from '@renderer/atoms/token-inventory.atom'
 import { todayTokensAtom, tokenStatsAtom } from '@renderer/atoms/stats.atom'
 import {
+  beginHydration,
+  failHydration,
   commitHistoryDelete,
   commitClusterProjection,
   appendCatalogBatch,
@@ -77,6 +79,30 @@ function openResult(latestCluster: HistoryClusterSummary): HistoryOpenResult {
 }
 
 describe('history capability', () => {
+  it('缺失历史独立标记，不影响仍存在的 Branch 正文', () => {
+    const store = createTestStore()
+    openHistoryProject(store, PROJECT_ID, PROJECT_PATH, openResult(cluster([entry('root', 100), entry('branch', 200, 'root')])))
+    const projection: HistoryClusterProjection = { clusterId: 'root', projectedAt: 1, sessions: ['root', 'branch'].map(sessionId => ({
+      sessionId, transcriptMissing: sessionId === 'root', timeline: sessionId === 'branch' ? [{ id: 'kept', sessionId, type: 'user_input', text: 'kept', parsedAt: 1 }] : [],
+      insertions: [], milestones: [], gitMarks: [], subagents: [], triggerNodeIndex: null, partialErrors: []
+    })) }
+    expect(commitClusterProjection(store, PROJECT_ID, 'request-1', 'generation-1', projection)).toBe(true)
+    expect(store.get(historyProjectsAtom).get(PROJECT_ID)?.unavailableSessionIds).toEqual(new Set(['root']))
+    expect(store.get(timelineBySessionAtom('branch'))[0]?.text).toBe('kept')
+    expect(store.get(historyProjectsAtom).get(PROJECT_ID)?.detailsStateByCluster.get('root')).toBe('resident')
+  })
+
+  it('不存在的历史不重试，但暂时读取错误保留重试状态', () => {
+    const store = createTestStore()
+    openHistoryProject(store, PROJECT_ID, PROJECT_PATH, openResult(cluster([entry('root', 100)])))
+    failHydration(store, PROJECT_ID, 'generation-1', 'root', 'missing', true)
+    expect(beginHydration(store, PROJECT_ID, 'generation-1', 'root')).toBe(false)
+    failHydration(store, PROJECT_ID, 'old-generation', 'root', 'old error')
+    expect(store.get(historyProjectsAtom).get(PROJECT_ID)?.detailsStateByCluster.get('root')).toBe('unavailable')
+    openHistoryProject(store, PROJECT_ID, PROJECT_PATH, openResult(cluster([entry('root', 100)])))
+    failHydration(store, PROJECT_ID, 'generation-1', 'root', 'locked')
+    expect(beginHydration(store, PROJECT_ID, 'generation-1', 'root')).toBe(true)
+  })
   it('历史目录写入独立壳状态，不把历史 Session 塞入 activeSessionsAtom', () => {
     const store = createTestStore()
     openHistoryProject(store, PROJECT_ID, PROJECT_PATH, openResult(cluster([entry('root', 100)])))

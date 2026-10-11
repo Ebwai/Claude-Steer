@@ -87,6 +87,7 @@ export interface McpLocatorInfo {
 }
 
 export interface TimelineProjectionResult {
+  transcriptMissing?: boolean
   timeline: HistoryTimelineNode[]
   visibleIndexByUuid: Map<string, number>
   errors: string[]
@@ -136,13 +137,18 @@ async function readHistoryTimeline(
   const byteRangeByNodeId = new Map<string, HistoryByteRange>()
   const mcpLocatorByNodeId = new Map<string, McpLocatorInfo>()
   const errors: string[] = []
-  const detectedLineEnding = await detectLineEnding(filePath)
   let fileSize = 0
   try {
     fileSize = (await fs.promises.stat(filePath)).size
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      console.info(`[HistoryProjection] transcript unavailable session=${sessionId.slice(0, 8)} agent=${agentId ?? 'main'}`)
+      return { timeline, visibleIndexByUuid, errors, byteRangeByNodeId, mcpLocatorByNodeId, transcriptMissing: true }
+    }
     console.warn(`[HistoryProjection] file size detection failed file=${path.basename(filePath)} error=${String(error)}`)
+    throw error
   }
+  const detectedLineEnding = await detectLineEnding(filePath)
   const stream = fs.createReadStream(filePath)
   const reader = readline.createInterface({ input: stream, crlfDelay: Infinity })
   let pendingSnapshotStart = false
@@ -279,6 +285,10 @@ async function readHistoryTimeline(
         )
       }
     }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    console.info(`[HistoryProjection] transcript removed during load session=${sessionId.slice(0, 8)} agent=${agentId ?? 'main'}`)
+    return { timeline: [], visibleIndexByUuid: new Map(), errors: [], byteRangeByNodeId: new Map(), mcpLocatorByNodeId: new Map(), transcriptMissing: true }
   } finally {
     reader.close()
     stream.destroy()
@@ -457,6 +467,7 @@ export async function loadHistoryClusterProjection(
     projections.push({
       sessionId: entry.sessionId,
       timeline: transcript.timeline,
+      transcriptMissing: transcript.transcriptMissing,
       insertions: insertions.values,
       milestones: milestones.values,
       gitMarks: gitMarks.values,

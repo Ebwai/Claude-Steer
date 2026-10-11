@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import os from 'node:os'
-import { promises as fs } from 'node:fs'
+import { promises as fs, statSync } from 'node:fs'
 import { normalizeComparablePath } from '../history/HistoryPaths'
 import { ManagedSessionCoordinator } from './ManagedSessionCoordinator'
 import { TranscriptDiscovery, probeTranscriptIdentity } from './TranscriptDiscovery'
@@ -23,6 +23,7 @@ interface RuntimeActions {
   exit: (session: ManagedSession, code: number) => void
   retire?: (session: ManagedSession, code: number) => void
   bind: (session: ManagedSession, transcriptPath: string) => void
+  watchTranscript: (session: ManagedSession, transcriptPath: string) => void
   configRoot: () => string | undefined
 }
 
@@ -59,7 +60,7 @@ export class ManagedAgentRuntime {
     const token = randomUUID()
     this.tokens.set(token, session.attemptId)
     let startupOutput = ''
-    this.actions.prepare(session)
+    let startupError: ManagedSession['startupError'] = 'process-start-failed'
     const options = {
       sessionId: session.ptyId, projectPath: session.cwd, permissionMode: input.permissionMode,
       model: input.model, claudeSessionId: session.mode === 'primary' ? session.expectedClaudeId : undefined,
@@ -86,6 +87,21 @@ export class ManagedAgentRuntime {
       }
     }
     try {
+      // cwd must be a usable directory; no history file is required for a new launch.
+      let isDirectory: boolean
+      try {
+        isDirectory = statSync(session.cwd).isDirectory()
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        startupError = code === 'ENOENT' ? 'project-directory-missing'
+          : code === 'ENOTDIR' ? 'project-directory-invalid' : 'project-directory-unavailable'
+        throw error
+      }
+      if (!isDirectory) {
+        startupError = 'project-directory-invalid'
+        throw new Error('Project path is not a directory')
+      }
+      this.actions.prepare(session)
       if (input.resumeSessionId) this.pty.resumeSession({ ...options, resumeSessionId: input.resumeSessionId })
       else this.pty.startSession(options)
       if (session.confirmedClaudeId) this.actions.bind(session, this.transcriptPath(session) ?? '')
@@ -93,8 +109,9 @@ export class ManagedAgentRuntime {
     } catch (error) {
       this.tokens.delete(token)
       this.cancelDiscovery(session.attemptId)
-      this.coordinator.onPtyExit(session.attemptId, session.ptyId, 1)
-      this.actions.exit(session, 1)
+      console.error('[ManagedRuntime] startup failed', { launchId: session.launchId, ptyId: session.ptyId, cwd: session.cwd, startupError })
+      this.coordinator.onPtyExit(session.attemptId, session.ptyId, 1, startupError)
+      this.actions.exit(this.coordinator.getByAttempt(session.attemptId) ?? session, 1)
       throw error
     }
   }
@@ -172,7 +189,11 @@ export class ManagedAgentRuntime {
     this.discovery.watch({ projectKey: path.dirname(filePath), claudeId: session.confirmedClaudeId ?? session.expectedClaudeId!, filePath }, controller.signal, (target) => {
       this.discoveries.delete(session.attemptId)
       if (this.coordinator.acceptEvidence({ attemptId: session.attemptId, bindingGeneration: session.bindingGeneration, claudeId: target.claudeId, source: 'exact-file', transcriptPath: target.filePath })) {
-        this.actions.bind(this.coordinator.getByAttempt(session.attemptId)!, target.filePath)
+        const current = this.coordinator.getByAttempt(session.attemptId)!
+        this.actions.bind(current, target.filePath)
+        // Identity binding alone cannot recover a Windows watch registered before the directory existed.
+        console.info('[ManagedRuntime] transcript ready; attaching content watch', { attemptId: current.attemptId, claudeId: target.claudeId, filePath: target.filePath })
+        this.actions.watchTranscript(current, target.filePath)
       }
     })
   }

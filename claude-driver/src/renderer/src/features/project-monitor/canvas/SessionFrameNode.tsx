@@ -12,6 +12,7 @@ import type { Session } from '@shared/types/index'
 import type { HistoryDetailsState } from '@shared/types/history'
 import { activeSessionsAtom, sessionFrameHeightsAtom, sessionRelationsAtom } from '../../../atoms/sessions.atom'
 import { sessionTokensAtom } from '../../../atoms/stats.atom'
+import { managedSessionsAtom } from '../../../atoms/managed-sessions.atom'
 import { tokenInventoryAtom } from '../../../atoms/token-inventory.atom'
 import { projectByIdAtom, milestonesByProjectAtom } from '../../../atoms/projects.atom'
 import { FRAME_HEADER_HEIGHT, computeFrozenOffset } from '../../../hooks/useSessionFrameLayout'
@@ -78,6 +79,8 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
   const { sessionId, ptyId, agentLabel, agentColor, source, detailsState } = data
   const activeSessions = useAtomValue(activeSessionsAtom)
   const session = activeSessions.get(sessionId) ?? data.session
+  const managedSessions = useAtomValue(managedSessionsAtom)
+  const managed = Array.from(managedSessions.values()).find(item => item.ptyId === (ptyId ?? session?.id))
   const setHeight = useSetAtom(sessionFrameHeightsAtom(id))
   const setAllHeights = useSetAtom(allFrameHeightsAtom)
   const { updateNodeData } = useReactFlow()
@@ -340,15 +343,27 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
             </div>
           )
         })}
-        {session?.isPtyPlaceholder ? (
-          <div className="sfn-history-shell">{isCompleted ? t('projectMonitor.canvas.historyLoadFailed') : t('projectMonitor.leftPanel.starting')}</div>
+        {session?.isPtyPlaceholder || managed?.startupError ? (
+          <div className="sfn-history-shell" role={managed?.lifecycle === 'failed' ? 'alert' : 'status'}>
+            {managed?.startupError
+              ? t(`projectMonitor.canvas.startupError.${managed.startupError}`)
+              : managed?.lifecycle === 'failed'
+                ? t('projectMonitor.canvas.startupFailed', { code: managed.exitCode ?? '?' })
+                : isCompleted
+                  ? t('projectMonitor.canvas.startupClosed')
+                  : managed?.terminalState === 'ready'
+                    ? t('projectMonitor.canvas.newSessionReady')
+                    : t('projectMonitor.leftPanel.starting')}
+          </div>
         ) : source === 'history' && detailsState !== 'resident' ? (
           <div className={`sfn-history-shell sfn-history-shell-${detailsState}`}>
             {detailsState === 'hydrating'
               ? t('projectMonitor.canvas.historyLoading')
               : detailsState === 'error'
                 ? t('projectMonitor.canvas.historyLoadFailed')
-                : t('projectMonitor.canvas.historyShell')}
+                : detailsState === 'unavailable'
+                  ? t('projectMonitor.canvas.historyUnavailable')
+                  : t('projectMonitor.canvas.historyShell')}
           </div>
         ) : (
           <ProcessTimeline

@@ -64,10 +64,8 @@ function LeftPanel(): React.JSX.Element {
       }) as { ok: boolean; sessionId?: string; error?: string }
       console.log(`[LP:WIN] handleStartSession AFTER: outerW=${window.outerWidth} outerH=${window.outerHeight} innerW=${window.innerWidth} innerH=${window.innerHeight}`)
 
-      if (result.ok && result.sessionId) {
-        // 只写 pending，等 SessionStart Hook 到达后 sessionLifecycle 以 claudeId 创建正式 entry
-        // Pending ownership is supplied by Main managed events; a late invoke result must not recreate it.
-      }
+      // Main publishes the startup frame immediately, including any launch failure.
+      if (!result.ok) console.error('[LeftPanel] SESSION_START rejected', { projectPath: project.path, error: result.error })
     } catch (err) {
       console.error('[LeftPanel] start session failed:', err)
     }

@@ -2,7 +2,7 @@
 // 编译说明：renderer React hook
 // 代码说明：热区优先水合、温区空闲预热、交互 gate 和 800ms 冷区迟滞回收
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { HistoryClusterSummary, HistoryDetailsState } from '@shared/types/history'
 import {
   computeHistoryWorkingSet,
@@ -16,6 +16,7 @@ const COLD_RELEASE_DELAY_MS = 800
 
 interface HistoryWorkingSetInput {
   clusters: HistoryClusterSummary[]
+  generation?: string
   detailsStateByCluster: ReadonlyMap<string, HistoryDetailsState>
   anchorSessionId: string | null
   targetSessionId: string | null
@@ -55,37 +56,45 @@ export function useHistoryWorkingSet(input: HistoryWorkingSetInput): HistoryWork
     direction,
   }), [clusters, anchorSessionId, targetSessionId, realtimeIds, direction])
 
+  const attemptedClustersRef = useRef(new Set<string>())
+  useEffect(() => { attemptedClustersRef.current.clear() }, [loader, input.generation])
+
   useEffect(() => {
+    const enrolled = new Set([...workingSet.hot, ...workingSet.warm])
+    for (const id of attemptedClustersRef.current) {
+      if (!enrolled.has(id)) attemptedClustersRef.current.delete(id)
+    }
     if (interactionPhase !== 'idle') return
+    const needsHydration = (id: string): boolean => {
+      const state = detailsStateByCluster.get(id)
+      return state === 'shell' || (state === 'error' && !attemptedClustersRef.current.has(id))
+    }
+    const hydrate = (ids: string[], priority: 'hot' | 'warm'): Promise<void> => {
+      ids.forEach(id => attemptedClustersRef.current.add(id))
+      return loader.hydrateClusters(ids, priority)
+    }
     const target = workingSet.targetClusterId
     const hotToHydrate = Array.from(workingSet.hot).filter((clusterId) => {
-      const state = detailsStateByCluster.get(clusterId)
-      return clusterId !== target && (state === 'shell' || state === 'error')
+      return clusterId !== target && needsHydration(clusterId)
     })
-    const targetNeedsHydration = !!target && (() => {
-      const state = detailsStateByCluster.get(target)
-      return state === 'shell' || state === 'error'
-    })()
+    const targetNeedsHydration = !!target && needsHydration(target)
 
-    const warmToHydrate = workingSet.warmPriority.filter((clusterId) => {
-      const state = detailsStateByCluster.get(clusterId)
-      return state === 'shell' || state === 'error'
-    })
+    const warmToHydrate = workingSet.warmPriority.filter(needsHydration)
     let cancelled = false
     let cancelWarmIdle: (() => void) | null = null
     // 相机已经稳定后才加载正文；严格按 target → hot → warm idle 顺序调度。
     void (async () => {
-      if (targetNeedsHydration && target) await loader.hydrateClusters([target], 'hot')
+      if (targetNeedsHydration && target) await hydrate([target], 'hot')
       if (cancelled) return
-      if (hotToHydrate.length > 0) await loader.hydrateClusters(hotToHydrate, 'hot')
+      if (hotToHydrate.length > 0) await hydrate(hotToHydrate, 'hot')
       if (cancelled || warmToHydrate.length === 0) return
-      cancelWarmIdle = scheduleIdle(() => { void loader.hydrateClusters(warmToHydrate, 'warm') })
+      cancelWarmIdle = scheduleIdle(() => { void hydrate(warmToHydrate, 'warm') })
     })()
     return () => {
       cancelled = true
       cancelWarmIdle?.()
     }
-  }, [detailsStateByCluster, interactionPhase, loader, workingSet.hot, workingSet.targetClusterId, workingSet.warmPriority])
+  }, [detailsStateByCluster, interactionPhase, loader, workingSet.hot, workingSet.targetClusterId, workingSet.warmPriority, input.generation])
 
   useEffect(() => {
     if (interactionPhase !== 'idle') return

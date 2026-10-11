@@ -341,7 +341,8 @@ export function useHistoryLoader(projectId: string | null): HistoryLoaderControl
           if (result.errorCode === 'HISTORY_CANCELLED') {
             cancelHydration(store, projectId, state.generation, clusterId)
           } else {
-            failHydration(store, projectId, state.generation, clusterId, result.error)
+            console.warn(`[HistoryLoader] details unavailable=${result.errorCode === 'HISTORY_NOT_FOUND'} cluster=${clusterId.slice(0, 8)} code=${result.errorCode}: ${result.error}`)
+            failHydration(store, projectId, state.generation, clusterId, result.error, result.errorCode === 'HISTORY_NOT_FOUND')
           }
           continue
         }

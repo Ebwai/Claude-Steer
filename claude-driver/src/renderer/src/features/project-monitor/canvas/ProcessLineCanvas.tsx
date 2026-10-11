@@ -66,7 +66,7 @@ const edgeTypes: EdgeTypes = {
 // ── Agent 颜色系（与 LeftPanel 一致） ────────────────────────────────────────
 
 const AGENT_COLORS = ['#35C98A', '#5B9BD5', '#DA7756', '#8B6FCB']
-const EMPTY_DETAILS_STATES = new Map<string, 'shell' | 'hydrating' | 'resident' | 'error'>()
+const EMPTY_DETAILS_STATES = new Map<string, 'shell' | 'hydrating' | 'resident' | 'error' | 'unavailable'>()
 
 interface ProcessLineCanvasProps {
   projectId: string | null
@@ -76,7 +76,7 @@ interface CanvasSessionView {
   session: Session
   source: 'realtime' | 'history'
   clusterId: string
-  detailsState: 'shell' | 'hydrating' | 'resident' | 'error'
+  detailsState: 'shell' | 'hydrating' | 'resident' | 'error' | 'unavailable'
 }
 
 interface DeleteDialogTarget {
@@ -143,7 +143,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
           },
           source: 'history',
           clusterId: cluster.clusterId,
-          detailsState,
+          detailsState: historyState?.unavailableSessionIds?.has(entry.sessionId) ? 'unavailable' : detailsState,
         })
       }
     }
@@ -263,6 +263,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
     [projectSessions],
   )
   useHistoryWorkingSet({
+    generation: historyState?.generation,
     clusters: historyState?.clusters ?? [],
     detailsStateByCluster: historyState?.detailsStateByCluster ?? EMPTY_DETAILS_STATES,
     anchorSessionId: focusedSessionId ? frameToContent.get(focusedSessionId) ?? focusedSessionId : null,

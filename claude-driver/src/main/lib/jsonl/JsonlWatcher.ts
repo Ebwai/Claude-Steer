@@ -492,7 +492,7 @@ export class JsonlWatcher {
   /** Tail 增量读取：Buffer framing，只读 readOffset 之后的新内容 */
   private readNewContent(filePath: string): void {
     const watched = this.watchedFiles.get(filePath)
-    if (!watched) return
+    if (!watched || (this.activeStreamsByFile.get(filePath)?.size ?? 0) > 0) return
 
     try {
       const stat = fs.statSync(filePath)
@@ -512,6 +512,7 @@ export class JsonlWatcher {
       const unprocessedBase = watched.readOffset - watched.tailBuffer.length
       let pendingBytes = watched.tailBuffer
       let lineByteOffset = unprocessedBase
+      let completed = false
 
       stream.on('data', (chunk) => {
         const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
@@ -533,12 +534,15 @@ export class JsonlWatcher {
         watched.readOffset = stat.size
         // 保留未完成字节（不完整 UTF-8 或无 LF 的尾行），等待下次 append 补充
         watched.tailBuffer = pendingBytes
+        completed = true
       })
 
       stream.on('close', () => {
         const current = this.activeStreamsByFile.get(filePath)
         current?.delete(stream)
         if (current?.size === 0) this.activeStreamsByFile.delete(filePath)
+        // A catch-up read and a native change can overlap; drain later bytes from the committed offset.
+        if (completed && this.watchedFiles.get(filePath) === watched) this.readNewContent(filePath)
       })
 
       stream.on('error', (err) => {

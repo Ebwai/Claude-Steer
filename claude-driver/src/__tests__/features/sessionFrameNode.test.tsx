@@ -33,6 +33,8 @@ vi.mock('jotai', () => ({
   useSetAtom: mocks.useSetAtom
 }))
 
+vi.mock('@renderer/atoms/managed-sessions.atom', () => ({ managedSessionsAtom: { kind: 'managedSessions' } }))
+
 vi.mock('@renderer/atoms/sessions.atom', () => ({
   activeSessionsAtom: { kind: 'active-sessions' },
   sessionFrameHeightsAtom: (sessionId: string) => ({ kind: 'session-height', sessionId }),
@@ -110,6 +112,7 @@ describe('SessionFrameNode bottom navigation button', () => {
     mocks.useAtomValue.mockImplementation((atom: { kind?: string }) => {
       switch (atom.kind) {
         case 'active-sessions': return new Map()
+        case 'managedSessions': return new Map()
         case 'relations': return new Map()
         case 'project': return { id: 'project-1' }
         case 'session-tokens': return { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }

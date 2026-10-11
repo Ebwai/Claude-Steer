@@ -238,6 +238,25 @@ describe('history catalog and deletion', () => {
     expect(result.clusters.at(-1)?.clusterId).toBe('session-29')
   })
 
+  it('missing transcripts preserve sibling history and can be restored on reload', async () => {
+    const entries = [entry('root', 100), entry('branch', 200, 'root')]
+    fs.writeFileSync(path.join(claudeDir, 'branch.jsonl'), JSON.stringify({ type: 'user', uuid: 'branch-user', message: { content: 'kept message' } }) + '\n')
+    const before = await loadHistoryClusterProjection(snapshot(claudeDir, entries), 'root')
+    expect(before.projection.sessions.find(s => s.sessionId === 'root')).toMatchObject({ transcriptMissing: true, timeline: [] })
+    expect(before.projection.sessions.find(s => s.sessionId === 'branch')?.timeline[0]?.text).toBe('kept message')
+    fs.writeFileSync(path.join(claudeDir, 'root.jsonl'), '')
+    const after = await loadHistoryClusterProjection(snapshot(claudeDir, entries), 'root')
+    expect(after.projection.sessions.find(s => s.sessionId === 'root')?.transcriptMissing).toBeUndefined()
+  })
+
+  it('真实 IO 故障不应伪装成没有历史', async () => {
+    const stat = vi.spyOn(fs.promises, 'stat').mockRejectedValueOnce(Object.assign(new Error('access denied'), { code: 'EACCES' }))
+    fs.writeFileSync(path.join(claudeDir, 'root.jsonl'), '{}\n')
+    try {
+      await expect(loadHistoryClusterProjection(snapshot(claudeDir, [entry('root', 100)]), 'root')).rejects.toMatchObject({ code: 'EACCES' })
+    } finally { stat.mockRestore() }
+  })
+
   it('历史详情跳过 forkedFrom 继承前缀并标记第一条 Branch 本地用户消息', async () => {
     const entries = [entry('root', 100), entry('branch', 200, 'root')]
     const forkedFrom = { sessionId: 'root', messageUuid: 'root-user' }

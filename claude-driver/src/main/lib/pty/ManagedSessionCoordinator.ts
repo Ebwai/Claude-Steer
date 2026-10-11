@@ -131,12 +131,15 @@ export class ManagedSessionCoordinator {
     return true
   }
 
-  onPtyExit(attemptId: string, ptyId: string, exitCode: number): boolean {
+  onPtyExit(attemptId: string, ptyId: string, exitCode: number, startupError?: ManagedSession['startupError']): boolean {
     const session = this.current(attemptId)
     if (!session || session.ptyId !== ptyId || session.terminalState === 'exited') return false
     const retry = this.live(session) && session.mode === 'primary' && !session.compatibilityTried &&
       !session.confirmedClaudeId && !session.inputWriteStarted && exitCode !== 0 && this.rejectedOptions.has(attemptId)
     session.terminalState = 'exited'
+    session.exitCode = exitCode
+    session.startupError = startupError
+    if (startupError) session.transcriptState = 'unavailable'
     session.lifecycle = session.lifecycle === 'cancelled' ? 'cancelled' : retry ? 'retry-pending' : exitCode === 0 ? 'ended' : 'failed'
     this.releaseIdentityLease(attemptId)
     this.releaseIndexes(session)
@@ -160,6 +163,8 @@ export class ManagedSessionCoordinator {
     session.expectedClaudeId = undefined
     session.mode = 'compatibility'
     session.compatibilityTried = true
+    session.exitCode = undefined
+    session.startupError = undefined
     session.terminalState = 'starting'
     session.lifecycle = 'starting'
     this.attempts.set(session.attemptId, launchId)

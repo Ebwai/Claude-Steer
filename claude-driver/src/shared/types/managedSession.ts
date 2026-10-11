@@ -19,6 +19,9 @@ export interface ManagedSession {
   bindingGeneration: number
   revision: number
   startedAt: number
+  /** Startup failures are independent of transcript availability. */
+  startupError?: 'project-directory-missing' | 'project-directory-invalid' | 'project-directory-unavailable' | 'process-start-failed'
+  exitCode?: number
   reason?: string
 }
 

@@ -288,7 +288,7 @@ export function beginHydration(store: Store, projectId: string, generation: stri
     const current = prev.get(projectId)
     if (!current || current.generation !== generation) return prev
     const state = current.detailsStateByCluster.get(clusterId)
-    if (state === 'resident' || state === 'hydrating' || !current.clusters.some((item) => item.clusterId === clusterId)) {
+    if (state === 'resident' || state === 'hydrating' || state === 'unavailable' || !current.clusters.some((item) => item.clusterId === clusterId)) {
       return prev
     }
     const states = new Map(current.detailsStateByCluster)
@@ -404,8 +404,13 @@ export function commitClusterProjection(
     const current = prev.get(projectId)
     if (!current || current.requestId !== requestId || current.generation !== generation) return prev
     const states = new Map(current.detailsStateByCluster)
-    states.set(projection.clusterId, 'resident')
-    return new Map(prev).set(projectId, { ...current, detailsStateByCluster: states })
+    const unavailableSessionIds = new Set(current.unavailableSessionIds)
+    for (const session of projection.sessions) {
+      if (session.transcriptMissing) unavailableSessionIds.add(session.sessionId)
+      else unavailableSessionIds.delete(session.sessionId)
+    }
+    states.set(projection.clusterId, projection.sessions.every(session => session.transcriptMissing) ? 'unavailable' : 'resident')
+    return new Map(prev).set(projectId, { ...current, detailsStateByCluster: states, unavailableSessionIds })
   })
   rebuildHistoryRelations(store)
   console.info(
@@ -420,12 +425,13 @@ export function failHydration(
   generation: string,
   clusterId: string,
   error: string,
+  unavailable = false,
 ): void {
   store.set(historyProjectsAtom, (prev) => {
     const current = prev.get(projectId)
     if (!current || current.generation !== generation) return prev
     const states = new Map(current.detailsStateByCluster)
-    states.set(clusterId, 'error')
+    states.set(clusterId, unavailable ? 'unavailable' : 'error')
     return new Map(prev).set(projectId, { ...current, detailsStateByCluster: states, error })
   })
 }
@@ -541,7 +547,7 @@ export function commitHistoryDelete(
       .flatMap((cluster) => cluster.sessions)
       .filter((entry) => !deleted.has(entry.sessionId))
     const clusters = rebuildClusters(remainingEntries)
-    const states = new Map<string, 'shell' | 'hydrating' | 'resident' | 'error'>()
+    const states = new Map<string, 'shell' | 'hydrating' | 'resident' | 'error' | 'unavailable'>()
     for (const cluster of clusters) {
       const wasAffected = cluster.sessions.some((entry) => affectedSessionIds.has(entry.sessionId))
       states.set(cluster.clusterId, wasAffected ? 'shell' : state.detailsStateByCluster.get(cluster.clusterId) ?? 'shell')
@@ -552,6 +558,7 @@ export function commitHistoryDelete(
       continuation: result.continuation,
       clusters,
       detailsStateByCluster: states,
+      unavailableSessionIds: new Set([...state.unavailableSessionIds ?? []].filter(id => !deleted.has(id))),
     })
   })
   store.set(tokenInventoryAtom, (prev) => {

@@ -20,6 +20,7 @@ export interface HistoryProjectState {
   totalClusters: number
   catalogLoading: boolean
   detailsStateByCluster: Map<string, HistoryDetailsState>
+  unavailableSessionIds?: Set<string>
   error: string | null
 }
 

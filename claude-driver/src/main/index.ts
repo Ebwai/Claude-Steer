@@ -281,7 +281,18 @@ const managedRuntime = new ManagedAgentRuntime(managedCoordinator, ptyManager, {
     }
   },
   bind: (session, transcriptPath) => {
-    if (session.confirmedClaudeId) bindPtyToClaudeSession(session.ptyId, session.confirmedClaudeId, transcriptPath, session.cwd)
+    if (!session.confirmedClaudeId) return
+    const previousClaudeId = ptyToClaudeMap.get(session.ptyId)
+    if (previousClaudeId && previousClaudeId !== session.confirmedClaudeId) {
+      // Branch keeps the launch but changes its transcript; Renderer owns any remaining history lease.
+      jsonlWatcher?.releaseSessionConsumer(previousClaudeId, `managed:${session.launchId}`)
+      console.info('[ManagedRuntime] released previous transcript lease', { launchId: session.launchId, claudeId: previousClaudeId })
+    }
+    bindPtyToClaudeSession(session.ptyId, session.confirmedClaudeId, transcriptPath, session.cwd)
+  },
+  watchTranscript: (session, transcriptPath) => {
+    if (!session.confirmedClaudeId) return
+    getJsonlWatcher().watchFile(transcriptPath, session.confirmedClaudeId, true, undefined, `managed:${session.launchId}`)
   },
   retire: (session, code) => {
     disposeTrustGate(session.ptyId, `managed-retire:${code}`)
