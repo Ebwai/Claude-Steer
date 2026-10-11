@@ -137,6 +137,10 @@ export interface PtyStartOptions {
   projectPath: string
   permissionMode: PermissionMode
   model?: string
+  /** Reserved Claude identity for ordinary managed starts (not PTY identity). */
+  claudeSessionId?: string
+  /** Per-process Hook correlation; never copied to persisted user settings. */
+  managedHookToken?: string
   /** 收到 stdout 数据时的回调（含 ANSI 控制码） */
   onData: (sessionId: string, data: string) => void
   /** 进程退出时的回调 */
@@ -183,7 +187,8 @@ export class PtyManager {
     const args = [
       '--output-format', 'stream-json',
       ...permissionModeToArgs(opts.permissionMode),
-      ...(opts.model ? ['--model', opts.model] : [])
+      ...(opts.model ? ['--model', opts.model] : []),
+      ...(opts.claudeSessionId ? ['--session-id', opts.claudeSessionId] : [])
     ]
     this._spawnSession(opts, args)
   }
@@ -237,7 +242,7 @@ export class PtyManager {
       cols: 220,
       rows: 50,
       cwd: opts.projectPath,
-      env: this._buildPtyEnv(),
+      env: { ...this._buildPtyEnv(), CLAUDE_STEER_HOOK_TOKEN: opts.managedHookToken ?? '' },
     })
 
     const instance: PtyInstance = {
@@ -315,7 +320,7 @@ export class PtyManager {
       cols: 220,
       rows: 50,
       cwd: opts.projectPath,
-      env: this._buildPtyEnv(),
+      env: { ...this._buildPtyEnv(), CLAUDE_STEER_HOOK_TOKEN: opts.managedHookToken ?? '' },
     })
 
     const instance: PtyInstance = {

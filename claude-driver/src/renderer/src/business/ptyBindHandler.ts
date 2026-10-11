@@ -19,6 +19,7 @@ import {
   removeFromRealtime,
   isRealtimeVisible,
 } from '@renderer/capabilities/realtimeVisibility'
+import { managedSessionsAtom } from '@renderer/atoms/managed-sessions.atom'
 import { activeSessionsAtom } from '@renderer/atoms/session-core.atom'
 import { pendingPtyStartsAtom, type PendingPtyStart } from '@renderer/atoms/pending-starts.atom'
 import { pathMatches } from '@renderer/utils/pathUtils'
@@ -72,6 +73,8 @@ export function createPtyBindHandler(store: Store): PtyBindHandler {
 
   function handleBind(payload: PtyBindPayload): void {
     const { ptyId, claudeId, transcriptPath, cwd, projectId: payloadProjectId } = payload
+    const managed = [...store.get(managedSessionsAtom).values()].find(s => s.ptyId === ptyId)
+    if (managed && (managed.terminalState === 'exited' || managed.lifecycle === 'cancelled')) return
 
     // I1: 更新双向绑定表
     bindPty(store, ptyId, claudeId)
@@ -117,6 +120,7 @@ export function createPtyBindHandler(store: Store): PtyBindHandler {
       patchSession(store, claudeId, {
         id: ptyId,
         claudeId,
+        ...(managed ? { frameId: managed.frameId } : {}),
         isPtyPlaceholder: false,
         ...(reconciledProjectId ? { projectId: reconciledProjectId } : {}),
         ...(resumesTerminalSession ? { status: 'Running', endedAt: null } : {}),
@@ -185,13 +189,14 @@ export function createPtyBindHandler(store: Store): PtyBindHandler {
       const newSession: Session = {
         id: ptyId,
         claudeId,
+        ...(managed ? { frameId: managed.frameId } : {}),
         projectId: payloadProjectId ?? pendingProjectId ?? '',
         status: 'Running',
         currentModel: null,
         tokenUsage: { current: null, max: null, usedPercentage: null },
         transcriptPath: transcriptPath ?? null,
         cwd: cwd ?? '',
-        startedAt: Date.now(),
+        startedAt: managed?.startedAt ?? Date.now(),
         endedAt: null,
         worktreePath: null,
         isPtyPlaceholder: isTemporaryPlaceholder,
@@ -204,6 +209,15 @@ export function createPtyBindHandler(store: Store): PtyBindHandler {
   }
 
   function handleUnbind(payload: PtyUnbindPayload): void {
+    const managed = [...store.get(managedSessionsAtom).values()].find(s => s.ptyId === payload.ptyId)
+    const current = getSession(store, payload.claudeId)
+    if (current && current.id !== payload.ptyId) return
+    if (managed && managed.transcriptState !== 'ready') {
+      unbindPty(store, payload.ptyId, payload.claudeId)
+      removeFromRealtime(store, payload.claudeId)
+      releaseSessionRuntime(store, payload.claudeId, { mode: 'destroy', reason: 'managed-exit-without-transcript' })
+      return
+    }
     unbindPty(store, payload.ptyId, payload.claudeId)
     // PTY 解绑时同步清理 ptySessionIdsAtom，确保 runningProjectsAtom 重新计算
     removeFromRealtime(store, payload.claudeId)

@@ -24,7 +24,8 @@ import '@xyflow/react/dist/style.css'
 import type { Session, HistoryDeleteInput, HistoryDeleteResult } from '@shared/types/index'
 import { IPC } from '@shared/events/ipc-channels'
 
-import { activeSessionsAtom, sessionRelationsAtom, agentLabelsAtom } from '../../../atoms/sessions.atom'
+import { sessionRelationsAtom, agentLabelsAtom } from '../../../atoms/sessions.atom'
+import { displaySessionsAtom as activeSessionsAtom } from '../../../atoms/managed-sessions.atom'
 import { projectByIdAtom } from '../../../atoms/projects.atom'
 import { viewportModeAtom, focusRequestAtom, focusedSessionIdAtom } from '../../../atoms/viewport.atom'
 import { nodeYOffsetsAtom, allFrameHeightsAtom } from '../../../atoms/agent-block.atom'
@@ -90,7 +91,7 @@ interface DeleteDialogTarget {
 function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JSX.Element {
   const project        = useAtomValue(projectByIdAtom(projectId ?? ''))
   const activeSessions = useAtomValue(activeSessionsAtom)
-  const relationsMap   = useAtomValue(sessionRelationsAtom)   // 订阅全局 Map，任意 branch 变化都触发重渲染
+  const contentRelationsMap = useAtomValue(sessionRelationsAtom)   // 订阅全局 Map，任意 branch 变化都触发重渲染
   const historyProjects = useAtomValue(historyProjectsAtom)
   const historyState    = projectId ? historyProjects.get(projectId) : undefined
   const deleteStates    = useAtomValue(historyDeleteStatesAtom)
@@ -150,7 +151,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
       if (!pathMatches(session.cwd, project.path)) continue
       // 早期 PTY_BIND 的临时会话只负责让实时面板立即可输入；它没有真实 Claude UUID，
       // 不能成为历史节点。SessionStart/真实 PTY_BIND 会把它原子迁移为正式会话。
-      if (session.isPtyPlaceholder) continue
+      // Managed startup shells are displayed here as well as in the realtime panel.
       const sessionId = session.claudeId ?? session.id
       const historyView = byId.get(sessionId)
       const isRealtime = session.status === 'Running' || session.status === 'Paused'
@@ -166,12 +167,22 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
     )
   }, [project, activeSessions, historyState])
 
-  // Map key 现在是 claudeId；sessionId = claudeId（稳定锚点），用作 node.id 和 atomFamily key
+  const contentToFrame = useMemo(() => new Map(projectSessions.map(({ session }) => [session.claudeId ?? session.id, session.frameId ?? session.claudeId ?? session.id])), [projectSessions])
+  const frameToContent = useMemo(() => new Map([...contentToFrame].map(([content, frame]) => [frame, content])), [contentToFrame])
+  const relationsMap = useMemo(() => new Map([...contentRelationsMap].map(([content, relation]) => [
+    contentToFrame.get(content) ?? content,
+    { ...relation, parentSessionId: relation.parentSessionId ? contentToFrame.get(relation.parentSessionId) ?? relation.parentSessionId : undefined }
+  ])), [contentRelationsMap, contentToFrame])
+
+  // Geometry uses stable frame IDs; transcript operations use confirmed content IDs.
   const sessionIds = useMemo(() => {
-    const ids = projectSessions.map(({ session }) => session.claudeId ?? session.id)
+    const ids = projectSessions.map(({ session }) => session.frameId ?? session.claudeId ?? session.id)
     console.debug(`[Canvas] shells=${ids.length} relations=${relationsMap.size}`)
     return ids
   }, [projectSessions, relationsMap])
+
+  const navigationSessionIds = useMemo(() => projectSessions.filter(({ session }) => !session.isPtyPlaceholder)
+    .map(({ session }) => session.frameId ?? session.claudeId ?? session.id), [projectSessions])
 
   // ── 框高度：优先使用 allFrameHeightsAtom（DOM 实测，驱动 Y 轴时间堆叠布局） ──
   const heightsMap = useMemo(() => {
@@ -186,7 +197,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
   const startTimesMap = useMemo(() => {
     const map = new Map<string, number>()
     sessionIds.forEach((id) => {
-      const view = projectSessions.find(({ session }) => (session.claudeId ?? session.id) === id)
+      const view = projectSessions.find(({ session }) => (session.frameId ?? session.claudeId ?? session.id) === id)
       if (view?.session.startedAt) map.set(id, view.session.startedAt)
     })
     return map
@@ -198,27 +209,27 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
   const nodeYOffsetsMap = useMemo(() => {
     const map = new Map<string, number[]>()
     sessionIds.forEach((id) => {
-      const offsets = store.get(nodeYOffsetsAtom(id))
+      const offsets = store.get(nodeYOffsetsAtom(frameToContent.get(id) ?? id))
       if (offsets.length > 0) map.set(id, offsets)
     })
     return map
-  }, [sessionIds, store, historyState?.detailsStateByCluster])
+  }, [sessionIds, store, frameToContent, historyState?.detailsStateByCluster])
 
   // ── 布局计算 ──────────────────────────────────────────────────────────────
   const layouts = useSessionFrameLayout(sessionIds, heightsMap, relationsMap, nodeYOffsetsMap, startTimesMap)
 
   const latestSessionId = useMemo(
-    () => selectLatestSessionId(projectSessions.map(({ session }) => ({
-      sessionId: session.claudeId ?? session.id,
+    () => selectLatestSessionId(projectSessions.filter(({ session }) => !session.isPtyPlaceholder).map(({ session }) => ({
+      sessionId: session.frameId ?? session.claudeId ?? session.id,
       startedAt: session.startedAt,
     }))),
     [projectSessions],
   )
   const realtimeSessionAnchors = useMemo(
     () => projectSessions
-      .filter((view) => view.source === 'realtime')
+      .filter((view) => view.source === 'realtime' && !view.session.isPtyPlaceholder)
       .map(({ session }) => ({
-        sessionId: session.claudeId ?? session.id,
+        sessionId: session.frameId ?? session.claudeId ?? session.id,
         startedAt: session.startedAt,
       })),
     [projectSessions],
@@ -237,7 +248,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
     navigationDirection,
   } = useProcessLineViewport(
     flowRef,
-    sessionIds,
+    navigationSessionIds,
     layouts,
     canvasContainerRef,
     allHeights,
@@ -254,8 +265,8 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
   useHistoryWorkingSet({
     clusters: historyState?.clusters ?? [],
     detailsStateByCluster: historyState?.detailsStateByCluster ?? EMPTY_DETAILS_STATES,
-    anchorSessionId: focusedSessionId,
-    targetSessionId,
+    anchorSessionId: focusedSessionId ? frameToContent.get(focusedSessionId) ?? focusedSessionId : null,
+    targetSessionId: targetSessionId ? frameToContent.get(targetSessionId) ?? targetSessionId : null,
     realtimeClusterIds,
     direction: navigationDirection,
     interactionPhase,
@@ -263,35 +274,36 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
   })
 
   // ── 全局键盘导航（↑↓游标 + ←→框跳转） ───────────────────────────────────
-  useGlobalKeyNav(rf, layouts, focusSession, focusSessionEdge, canvasContainerRef, projectId)
+  const navigationLayouts = useMemo(() => layouts.filter(layout => navigationSessionIds.includes(layout.sessionId)), [layouts, navigationSessionIds])
+  useGlobalKeyNav(rf, navigationLayouts, focusSession, focusSessionEdge, canvasContainerRef, projectId)
 
   // ── 响应外部写入的 focusRequest（来自 AgentBlock onSent 等场景）────────────
   // 与 ↓↓ 共用统一 explicit 相机事务：既有 90% 宽度、框底位于视口 3/4 的构图。
   useEffect(() => {
     if (!focusRequest) return
-    const { sessionId } = focusRequest
-    if (!sessionIds.includes(sessionId)) { setFocusRequest(null); return }
+    const sessionId = contentToFrame.get(focusRequest.sessionId) ?? focusRequest.sessionId
+    if (!navigationSessionIds.includes(sessionId)) { setFocusRequest(null); return }
 
     focusSessionEdge(sessionId, 'bottom', 'message-sent')
     setFocusRequest(null)
-  }, [focusRequest, sessionIds, focusSessionEdge, setFocusRequest])
+  }, [focusRequest, navigationSessionIds, focusSessionEdge, setFocusRequest, contentToFrame])
 
   // ── orderedMainSessionIds：按 X 坐标稳定排序，只供全局主线点导航 ────────────
   // 必须放在所有早期 return 之前，确保 useMemo 每次渲染都被调用（React Hooks 规则）
   const orderedMainSessionIds = useMemo(
-    () => selectOrderedMainSessionIds(layouts, relationsMap),
-    [layouts, relationsMap],
+    () => selectOrderedMainSessionIds(navigationLayouts, relationsMap),
+    [navigationLayouts, relationsMap],
   )
 
   const sessionViewById = useMemo(
-    () => new Map(projectSessions.map((view) => [view.session.claudeId ?? view.session.id, view])),
+    () => new Map(projectSessions.map((view) => [view.session.frameId ?? view.session.claudeId ?? view.session.id, view])),
     [projectSessions],
   )
 
   const handleRequestDelete = useCallback((sessionId: string) => {
-    const view = sessionViewById.get(sessionId)
+    const view = sessionViewById.get(contentToFrame.get(sessionId) ?? sessionId)
     if (!view || view.source !== 'history' || !historyState) return
-    const isBranch = relationsMap.get(sessionId)?.type === 'branch'
+    const isBranch = contentRelationsMap.get(sessionId)?.type === 'branch'
     const cluster = historyState.clusters.find((item) => item.clusterId === view.clusterId)
     const childrenByParent = new Map<string, string[]>()
     for (const entry of cluster?.sessions ?? []) {
@@ -317,7 +329,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
       branchCount: Math.max(0, (cluster?.sessions.length ?? 1) - 1),
       descendantCount,
     })
-  }, [historyState, relationsMap, sessionViewById])
+  }, [historyState, contentRelationsMap, sessionViewById, contentToFrame])
 
   // ── 构建 ReactFlow Node 列表 ──────────────────────────────────────────────
   const nodes = useMemo<Node[]>(() => {
@@ -329,22 +341,22 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
       const historyLabel = relation?.type === 'branch'
         ? `历史 Branch${(relation.branchIndex ?? 1) > 1 ? relation.branchIndex : ''}`
         : t('projectMonitor.canvas.historyMainLine')
-      const deleting = deleteStates.get(sessionId)?.status === 'deleting'
+      const deleting = deleteStates.get(session.claudeId ?? session.id)?.status === 'deleting'
       const data: SessionFrameData = {
         projectId: projectId ?? '',
-        sessionId,
+        sessionId: session.claudeId ?? session.id,
         ptyId: source === 'realtime' ? session.id : undefined,
         session,
         source,
         detailsState,
         clusterId,
-        deleteDisabled: session.status === 'Running' || session.status === 'Paused',
+        deleteDisabled: Boolean(session.isPtyPlaceholder) || session.status === 'Running' || session.status === 'Paused',
         isDeleting: deleting,
         layoutMeasurementGate,
         onRequestDelete: handleRequestDelete,
         onFocusBottom: (targetSessionId) =>
-          focusSessionEdge(targetSessionId, 'bottom', 'header-bottom-button'),
-        agentLabel: agentLabels.get(sessionId) ?? (source === 'history' ? historyLabel : idx === 0 ? t('projectMonitor.canvas.mainLine') : `Agent${idx + 1}`),
+          !session.isPtyPlaceholder && focusSessionEdge(contentToFrame.get(targetSessionId) ?? targetSessionId, 'bottom', 'header-bottom-button'),
+        agentLabel: agentLabels.get(session.claudeId ?? session.id) ?? (source === 'history' ? historyLabel : idx === 0 ? t('projectMonitor.canvas.mainLine') : `Agent${idx + 1}`),
         agentColor: AGENT_COLORS[idx % AGENT_COLORS.length],
         isExpanded: true,
         estimatedHeight: heightsMap.get(sessionId) ?? 400,
@@ -355,11 +367,11 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
         position: { x, y },
         data,
         draggable: false,
-        selectable: true,
+        selectable: !session.isPtyPlaceholder,
         style: { width: FRAME_WIDTH },
       } as Node
     }).filter((node): node is Node => node !== null)
-  }, [layouts, heightsMap, sessionViewById, relationsMap, deleteStates, handleRequestDelete, layoutMeasurementGate, agentLabels, projectId, focusSessionEdge, t])
+  }, [layouts, heightsMap, sessionViewById, relationsMap, deleteStates, handleRequestDelete, layoutMeasurementGate, agentLabels, projectId, focusSessionEdge, contentToFrame, t])
 
   // ── 构建 branch Edge 列表（情形2）─────────────────────────────────────────
   // sourceHandle/targetHandle 对应 SessionFrameNode 内动态注册的 Handle id
@@ -373,14 +385,14 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
         id: `branch-${rel.parentSessionId}-${childSessionId}`,
         source: rel.parentSessionId,
         target: childSessionId,
-        sourceHandle: `src-${childSessionId}`,   // 父框上精确定位的 source handle
+        sourceHandle: `src-${frameToContent.get(childSessionId) ?? childSessionId}`,   // 父框上精确定位的 source handle
         targetHandle: 'branch-target',            // 子框左/右上角的 target handle
         type: 'branchEdge',
         data: { label: t('projectMonitor.canvas.inheritMemory') },
       } as Edge)
     }
     return result
-  }, [relationsMap, nodes, t])
+  }, [relationsMap, nodes, frameToContent, t])
 
   // ── 情形3：多独立 Session 时的垂直分隔线（CSS absolute，不用 Edge）──────
   // 分隔线位置 = 两相邻独立框中间的画布 X 坐标（在 ReactFlow 外层 overlay div 中渲染）
@@ -405,6 +417,7 @@ function ProcessLineCanvasInner({ projectId }: ProcessLineCanvasProps): React.JS
   const handleNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     const target = event.target as HTMLElement
     if (!target.closest('.sfn-header') || target.closest('button, input, textarea, select, a')) return
+    if ((node.data as SessionFrameData).session?.isPtyPlaceholder) return
     focusSession(node.id)
   }, [focusSession])
 

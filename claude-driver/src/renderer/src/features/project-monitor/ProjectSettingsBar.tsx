@@ -16,7 +16,6 @@ import {
 } from '../../atoms/projects.atom'
 import { activeSessionsAtom } from '../../atoms/session-core.atom'
 import type { Session, PermissionMode } from '@shared/types/index'
-import { pendingPtyStartsAtom } from '../../atoms/pending-starts.atom'
 import SettingsDropdown, { type RadioOption, type CheckboxOption, type CheckboxGroup } from './SettingsDropdown'
 import { useT, type TFunction } from '../../i18n'
 import './ProjectSettingsBar.css'
@@ -241,11 +240,7 @@ function ProjectSettingsBar(): React.JSX.Element {
 
       if (result.ok && result.sessionId) {
         // 只写 pending，等 SessionStart Hook 到达后 sessionLifecycle 以 claudeId 创建正式 entry
-        store.set(pendingPtyStartsAtom, (prev) => {
-          const m = new Map(prev)
-          m.set(project.path, { ptyId: result.sessionId!, projectId: project.id })
-          return m
-        })
+        // Pending ownership is supplied by Main managed events; a late invoke result must not recreate it.
       }
     } catch (err) {
       console.error('[ProjectSettingsBar] add agent failed:', err)

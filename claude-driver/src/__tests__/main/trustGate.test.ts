@@ -169,8 +169,10 @@ describe('TrustGate', () => {
     const { gate } = createTestGate()
     const sendInput = vi.fn()
 
-    expect(gate.deferUntilReady(sendInput, 'programmatic-session-input')).toBe(true)
+    const cancel = vi.fn()
+    expect(gate.deferUntilReady(sendInput, 'programmatic-session-input', cancel)).toBe(true)
     gate.dispose('session-exit')
+    expect(cancel).toHaveBeenCalledTimes(1)
     gate.markReady('late-bind')
 
     expect(sendInput).not.toHaveBeenCalled()

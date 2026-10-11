@@ -1,6 +1,6 @@
 {
   "name": "claude-steer",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "packageManager": "npm@10.9.8",
   "description": "Claude Code 本地可视化仪表盘",
   "main": "./out/main/index.js",

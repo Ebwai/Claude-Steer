@@ -5,6 +5,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { readClaudeEnvBlock } from '../config/SettingsManager'
 
 const SAFE_SESSION_ID = /^[a-zA-Z0-9_-]+$/
 
@@ -17,8 +18,10 @@ export function encodeProjectPath(projectPath: string): string {
   return projectPath.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
-export function resolveProjectDirectory(projectPath: string, homeDir = os.homedir()): string {
-  return path.join(homeDir, '.claude', 'projects', encodeProjectPath(projectPath))
+export function resolveProjectDirectory(projectPath: string, homeDir?: string): string {
+  const configuredRoot = homeDir === undefined ? readClaudeEnvBlock().CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR : undefined
+  const configRoot = configuredRoot || path.join(homeDir ?? os.homedir(), '.claude')
+  return path.join(configRoot, 'projects', encodeProjectPath(projectPath))
 }
 
 export function normalizeComparablePath(value: string): string {

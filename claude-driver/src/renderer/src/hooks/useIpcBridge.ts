@@ -76,6 +76,9 @@ export function ensureStartupTokenInventory(store: RendererStore): Promise<void>
   return wrappedTask
 }
 
+import { applyManagedChange, applyManagedSnapshot } from '../capabilities/managedSessionCapability'
+import type { ManagedChange, ManagedSnapshot } from '@shared/types/managedSession'
+
 export function useIpcBridge(): void {
   const store = useStore()
 
@@ -112,6 +115,14 @@ export function useIpcBridge(): void {
       ...context.register(),
       ...detail.register(),
     ]
+
+    let disposed = false
+    unsubscribers.push(window.api.on(IPC.MANAGED_SESSION_SNAPSHOT, data => applyManagedSnapshot(store, data as ManagedSnapshot)))
+    unsubscribers.push(window.api.on(IPC.MANAGED_SESSION_CHANGE, data => applyManagedChange(store, data as ManagedChange)))
+    void window.api.invoke(IPC.MANAGED_SESSION_SNAPSHOT).then(snapshot => {
+      if (!disposed && snapshot && typeof snapshot === 'object' && 'sessions' in snapshot) applyManagedSnapshot(store, snapshot as ManagedSnapshot)
+    }).catch(error => console.error('[ManagedSession] snapshot failed', error))
+    unsubscribers.push(() => { disposed = true })
 
     // 通知队列（全局，无业务逻辑，直接在此处理）
     unsubscribers.push(

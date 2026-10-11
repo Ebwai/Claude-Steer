@@ -12,6 +12,9 @@ export const IPC = {
   PLAN_UPDATED: 'plan:updated',
   /** 进程状态变化（Running / Paused / Interrupted / Completed） */
   SESSION_STATUS: 'session:status',
+  MANAGED_SESSION_CHANGE: 'session:managed-change',
+  MANAGED_SESSION_SNAPSHOT: 'session:managed-snapshot',
+  MANAGED_SESSION_RELEASE: 'session:managed-release',
   /** 新权限请求 / Agent 通知 */
   NOTIFICATION: 'notification:new',
 

@@ -150,14 +150,16 @@ export function removeClaudeEnvBlock(): void {
 const HOOK_BRIDGE_SCRIPT = 'hook-bridge.ps1'
 
 /** 生成 Windows hook 桥接 .ps1 脚本：读取 stdin JSON，POST 到 hook server */
-function generateHookWindowsScript(port: number): string {
+export function generateHookWindowsScript(port: number): string {
   const hookUrl = `http://127.0.0.1:${port}/hooks`
   return `# Claude Steer Hook Bridge (Windows PowerShell)
 # 由 Claude Code 在触发 hook 事件时自动调用，将 stdin JSON 转发到仪表盘 hook server
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 $body = [Console]::In.ReadToEnd()
 try {
-  Invoke-RestMethod -Uri '${hookUrl}' -Method Post -ContentType 'application/json; charset=utf-8' -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+  $headers = @{}
+  if ($env:CLAUDE_STEER_HOOK_TOKEN) { $headers['X-Steer-Hook-Token'] = $env:CLAUDE_STEER_HOOK_TOKEN }
+  Invoke-RestMethod -Uri '${hookUrl}' -Headers $headers -Method Post -ContentType 'application/json; charset=utf-8' -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 } catch {}
 `
 }
@@ -182,7 +184,7 @@ function buildHookCommand(hookUrl: string): string {
     return `powershell -ExecutionPolicy Bypass -File "${path.join(DRIVER_CONFIG_DIR, HOOK_BRIDGE_SCRIPT)}"`
   }
   // macOS/Linux: curl 读取 stdin 转发到本地 HTTP server
-  return `curl -s -X POST ${hookUrl} -H 'Content-Type: application/json' -d @-`
+  return `curl -s -X POST ${hookUrl} -H 'Content-Type: application/json' -H "X-Steer-Hook-Token: $CLAUDE_STEER_HOOK_TOKEN" -d @-`
 }
 
 export function injectHookConfig(port: number): void {

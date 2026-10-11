@@ -33,6 +33,8 @@ import {
 import { scanForProjects } from './lib/projects/ProjectScanner'
 import { prepareProjectDirectory } from './lib/projects/ProjectDirectory'
 import { PtyManager } from './lib/pty/PtyManager'
+import { ManagedSessionCoordinator } from './lib/pty/ManagedSessionCoordinator'
+import { ManagedAgentRuntime } from './lib/pty/ManagedAgentRuntime'
 import { createTrustGate, type TrustGate } from './lib/pty/TrustGate'
 import { findNewBranchTranscript, snapshotTranscriptIds } from './lib/pty/BranchTranscriptDetector'
 import { resolveSessionStartPty } from './lib/pty/PtySessionBinding'
@@ -212,13 +214,21 @@ function createManagedTrustGate(sessionId: string, projectPath: string): TrustGa
 }
 
 function inspectTrustGate(sessionId: string, data: string): boolean {
-  return trustGatesByPtyId.get(sessionId)?.inspect(data) ?? false
+  const gate = trustGatesByPtyId.get(sessionId)
+  const handled = gate?.inspect(data) ?? false
+  if (gate?.state === 'ready') {
+    const managed = managedCoordinator.getByPty(sessionId)
+    if (managed) managedCoordinator.markTerminalReady(managed.attemptId)
+  }
+  return handled
 }
 
 function markTrustGateReady(sessionId: string, reason: string): void {
   const gate = trustGatesByPtyId.get(sessionId)
   if (!gate) return
   gate.markReady(reason)
+  const managed = managedCoordinator.getByPty(sessionId)
+  if (managed) managedCoordinator.markTerminalReady(managed.attemptId)
   trustGatesByPtyId.delete(sessionId)
 }
 
@@ -258,15 +268,45 @@ const confirmedBranchPtyIds = new Set<string>()  // 已确认 branch 的 ptyId�
 // ── PTY ↔ Claude Code session 双向绑定表（主进程权威数据）───────────────────
 // ptyToClaudeMap: ptyId → claudeId（用于解绑时反查）
 // claudeToPtyMap: claudeId → ptyId（用于 SESSION_INPUT 路由）
+const managedCoordinator = new ManagedSessionCoordinator(change => sendToRenderers(IPC.MANAGED_SESSION_CHANGE, change))
+const managedRuntime = new ManagedAgentRuntime(managedCoordinator, ptyManager, {
+  configRoot: () => readClaudeEnvBlock().CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR,
+  prepare: session => createManagedTrustGate(session.ptyId, session.cwd),
+  data: (session, data) => {
+    inspectTrustGate(session.ptyId, data)
+    sendToRenderers(IPC.SESSION_STATUS, { sessionId: session.ptyId, data })
+    termWindows.get(session.ptyId)?.webContents.send(IPC.TERM_DATA, data)
+    if (/Branched[\\s\\u2500\\-]+conversation/i.test(stripAnsi(data)) && !confirmedBranchPtyIds.has(session.ptyId)) {
+      pendingBranchByPtySession.set(session.ptyId, Date.now())
+    }
+  },
+  bind: (session, transcriptPath) => {
+    if (session.confirmedClaudeId) bindPtyToClaudeSession(session.ptyId, session.confirmedClaudeId, transcriptPath, session.cwd)
+  },
+  retire: (session, code) => {
+    disposeTrustGate(session.ptyId, `managed-retire:${code}`)
+    pendingBranchByPtySession.delete(session.ptyId)
+  },
+  exit: (session, code) => {
+    disposeTrustGate(session.ptyId, `managed-exit:${code}`)
+    sendToRenderers(IPC.SESSION_STATUS, { sessionId: session.ptyId, status: 'Completed' })
+    const claudeId = ptyToClaudeMap.get(session.ptyId)
+    if (claudeId && claudeToPtyMap.get(claudeId) === session.ptyId) unbindPtyFromClaudeSession(claudeId)
+    pendingBranchByPtySession.delete(session.ptyId)
+    termWindows.get(session.ptyId)?.webContents.send(IPC.TERM_DATA, '\r\n[进程已退出]\r\n')
+  },
+})
 const ptyToClaudeMap = new Map<string, string>()
 const claudeToPtyMap = new Map<string, string>()
 const resourceService = new ResourceService({
   writeToSession: (ptyId, text) => new Promise<void>((resolve, reject) => {
+    const managed = managedCoordinator.getByPty(ptyId)
     const execute = (): void => {
+      try { if (managed) managedCoordinator.observeInputWrite(managed.attemptId, ptyId) } catch (error) { reject(error); return }
       void ptyManager.writeToSession(ptyId, text).then(resolve, reject)
     }
     const trustGate = trustGatesByPtyId.get(ptyId)
-    if (trustGate?.deferUntilReady(execute, 'resource-session-input')) {
+    if (trustGate?.deferUntilReady(execute, 'resource-session-input', () => reject(new Error('STALE_ATTEMPT')))) {
       console.info(`[ResourceService] send deferred until trusted startup is ready pty=${ptyId.slice(0, 8)}`)
       return
     }
@@ -283,8 +323,7 @@ function watchForBranchTranscript(
   projectPath: string,
   branchStartedAt: number,
 ): void {
-  const encoded = projectPath.replace(/[^a-zA-Z0-9]/g, '-')
-  const projectDir = path.join(os.homedir(), '.claude', 'projects', encoded)
+  const projectDir = resolveProjectDirectory(projectPath)
   const knownSessionIds = snapshotTranscriptIds(projectDir)
   const deadline = branchStartedAt + 120_000
   console.log(
@@ -307,6 +346,10 @@ function watchForBranchTranscript(
         timestamp: Date.now(),
       })
       // confirm 必须先于 PTY_BIND，Branch 状态机才能先进入 PENDING_BIND。
+      if (managedCoordinator.getByPty(parentPtyId)) {
+        if (!managedRuntime.confirmBranch(parentPtyId, parentClaudeId, candidate.sessionId)) console.warn('[Branch] managed transition rejected', { parentPtyId, parentClaudeId })
+        return
+      }
       autoWatchTranscript(
         candidate.sessionId,
         projectPath,
@@ -375,6 +418,10 @@ function unbindPtyFromClaudeSession(claudeId: string): void {
   if (ptyToClaudeMap.get(ptyId) === claudeId) ptyToClaudeMap.delete(ptyId)
   if (claudeToPtyMap.get(claudeId) === ptyId) claudeToPtyMap.delete(claudeId)
   sessionCwdMap.delete(claudeId)
+  getDetailService().cleanupBySession(claudeId)
+  for (const scope of mcpResponseRefs.keys()) {
+    if (scope.startsWith(`${claudeId}::`)) { mcpResponseRefs.delete(scope); mcpResponseSeenAt.delete(scope) }
+  }
   // SessionEnd / PTY exit 的统一 watcher 释放边界。renderer 随后的 UNWATCH 可重复调用。
   const releasedFiles = jsonlWatcher?.unwatchSession(claudeId) ?? 0
   const unbindPayload = { ptyId, claudeId }
@@ -1212,108 +1259,27 @@ function registerIpcHandlers(): void {
 
   // ── PTY Session 管理 ────────────────────────────────────────────────────────
 
-  ipcMain.handle(IPC.SESSION_START, async (
-    _event,
-    payload: {
-      sessionId?: string
-      projectId: string
-      projectPath: string
-      permissionMode: PermissionMode
-      model?: string
-    }
-  ) => {
-    const sessionId = payload.sessionId ?? randomUUID()
+  ipcMain.handle(IPC.MANAGED_SESSION_SNAPSHOT, () => managedCoordinator.snapshot())
+  ipcMain.handle(IPC.MANAGED_SESSION_RELEASE, (_event, launchIds: string[]) => {
+    if (!Array.isArray(launchIds)) return
+    for (const launchId of launchIds) managedCoordinator.releaseEnded(launchId)
+    sendToRenderers(IPC.MANAGED_SESSION_SNAPSHOT, managedCoordinator.snapshot())
+  })
+  ipcMain.handle(IPC.SESSION_START, async (_event, payload: {
+    launchId?: string; projectId: string; projectPath: string; permissionMode: PermissionMode; model?: string
+  }) => {
     try {
-      const logWinState = (globalThis as Record<string, unknown>).__logMainWinState as ((tag: string) => void) | undefined
-      logWinState?.('SESSION_START_begin')
-      const sessionStartTime = Date.now()
-      createManagedTrustGate(sessionId, payload.projectPath)
-      logWinState?.('SESSION_START_afterTrust')
-      // 调试：记录启动参数和环境
-      console.log(`[DEBUG:SESSION_START] projectId=${payload.projectId} projectPath=${payload.projectPath} permissionMode=${payload.permissionMode}`)
-      console.log(`[DEBUG:SESSION_START] PATH=${process.env.PATH}`)
-      console.log(`[DEBUG:SESSION_START] HOME=${process.env.HOME}`)
-      ptyManager.startSession({
-        sessionId,
-        projectPath: payload.projectPath,
-        permissionMode: payload.permissionMode,
-        model: payload.model,
-        onData: (sid, data) => {
-          // 调试：捕获 PTY 原始输出
-          console.log(`[DEBUG:PTY_RAW] session=${sid} data=${JSON.stringify(data.slice(0, 300))}`)
-          inspectTrustGate(sid, data)
-          sendToRenderers(IPC.SESSION_STATUS, { sessionId: sid, data })
-          termWindows.get(sid)?.webContents.send(IPC.TERM_DATA, data)
-          // /branch 成功时 stdout 输出 "Branched─conversation"（─ = U+2500 制表线）
-          const plain = stripAnsi(data)
-          if (/Branched[\s\u2500\-]+conversation/i.test(plain) && !confirmedBranchPtyIds.has(sid)) {
-            pendingBranchByPtySession.set(sid, Date.now())
-            console.log(`[Branch] stdout detected /branch on PTY session ${sid}`)
-          }
-        },
-        onExit: (sid, exitCode) => {
-          console.log(`[PtyManager] Session ${sid} exited with code ${exitCode}`)
-          disposeTrustGate(sid, `session-exit:${exitCode}`)
-          console.log(`[DEBUG:PTY_EXIT] session=${sid} exitCode=${exitCode} time=${Date.now()}`)
-          sendToRenderers(IPC.SESSION_STATUS, {
-            sessionId: sid,
-            status: 'Completed',
-          })
-          // PTY 退出时直接向渲染进程发 PTY_UNBIND，不依赖 SessionEnd Hook
-          // 注意：不能用 unbindPtyFromClaudeSession(sid)，因为迁移后 claudeToPtyMap 的 key
-          // 是真实 claudeId 而非 sid（ptyId），lookup 会失败导致 early return
-          const claudeId = ptyToClaudeMap.get(sid) ?? sid
-          sendToRenderers(IPC.PTY_UNBIND, { ptyId: sid, claudeId })
-          unbindPtyFromClaudeSession(claudeId)
-          termWindows.get(sid)?.webContents.send(IPC.TERM_DATA, '\r\n[进程已退出]\r\n')
-          pendingBranchByPtySession.delete(sid)
-        },
-      })
-
-      // 立即发送早期 PTY_BIND 到渲染端，创建临时 session entry（ptyId 作为临时 claudeId）
-      // 这样即使 Hook/JSONL 未就绪，渲染端也能立即显示正在运行的 session
-      const earlyBindPayload = {
-        ptyId: sessionId,
-        claudeId: sessionId,  // 临时占位，autoWatchTranscript 或 Hook 到达后用真实 claudeId 迁移
-        transcriptPath: null,
-        cwd: payload.projectPath,
-        projectId: payload.projectId,  // 直接传入，避免 pendingPtyStartsAtom 时序问题
-      }
-      sessionCwdMap.set(sessionId, { ptyId: sessionId, cwd: payload.projectPath })
-      mainWindow?.webContents.send(IPC.PTY_BIND, earlyBindPayload)
-      if (notificationWindow && !notificationWindow.isDestroyed()) {
-        notificationWindow.webContents.send(IPC.PTY_BIND, earlyBindPayload)
-      }
-      console.log(`[PtyBind] Early PTY_BIND sent: PTY=${sessionId} (temporary claudeId, waiting for real binding)`)
-
-      logWinState?.('SESSION_START_afterPtyStart')
-      // 主动监控 transcript 文件（不依赖 hooks/statusLine，仿 agent-flow 方式）
-      autoWatchTranscript(sessionId, payload.projectPath, sessionStartTime)
-
-      logWinState?.('SESSION_START_afterWatch')
-      // 更新 projects.json 记录活跃 session
-      const existing = readProjects().find((p) => p.id === payload.projectId)
+      const session = managedRuntime.start(payload)
+      const existing = readProjects().find(p => p.id === payload.projectId)
       if (existing) {
-        upsertProject({
-          ...existing,
-          activeSessionId: sessionId,
-          sessionIds: [...existing.sessionIds, sessionId],
-          lastActiveAt: Date.now(),
-        })
+        const updated = { ...existing, activeSessionId: session.ptyId, sessionIds: [...new Set([...existing.sessionIds, session.ptyId])], lastActiveAt: Date.now() }
+        upsertProject(updated)
+        sendToRenderers(IPC.PROJECT_UPDATED, updated)
       }
-
-      // 通知渲染进程刷新该项目（activeSessionId 已更新）
-      const updatedProject = readProjects().find((p) => p.id === payload.projectId)
-      if (updatedProject) {
-        mainWindow?.webContents.send(IPC.PROJECT_UPDATED, updatedProject)
-      }
-
-      console.log(`[ipc] session:start OK → ${sessionId}`)
-      return { ok: true, sessionId }
-    } catch (err) {
-      disposeTrustGate(sessionId, 'session-start-failed')
-      console.error('[ipc] session:start failed:', err)
-      return { ok: false, error: String(err) }
+      return { ok: true, sessionId: session.ptyId, launchId: session.launchId, attemptId: session.attemptId, frameId: session.frameId }
+    } catch (error) {
+      console.error('[ManagedRuntime] start failed', error)
+      return { ok: false, error: String(error) }
     }
   })
 
@@ -1324,13 +1290,16 @@ function registerIpcHandlers(): void {
     try {
       // 若 sessionId 是 Claude Code UUID（branch session），通过绑定表反查真实 PTY UUID
       const ptyId = claudeToPtyMap.get(payload.sessionId) ?? payload.sessionId
-      const executeInput = (): void => {
+      const managedInput = managedCoordinator.getByPty(ptyId)
+      const executeInput = async (): Promise<void> => {
+        let writeTask: Promise<void> | undefined
+        if (managedInput) managedCoordinator.observeInputWrite(managedInput.attemptId, ptyId)
         // raw=true：xterm 交互模式，每次按键原样发到 PTY，由 line discipline 处理行缓冲
         // raw=false（默认）：程序注入整句指令，自动追加 \r 触发执行
         if (payload.raw) {
           ptyManager.rawWrite(ptyId, payload.text)
         } else {
-          ptyManager.writeToSession(ptyId, payload.text)
+          writeTask = ptyManager.writeToSession(ptyId, payload.text)
         }
         // 精确匹配 "/branch"（去除首尾空白后完全等于 /branch）
         if (payload.text.trim() === '/branch') {
@@ -1369,22 +1338,21 @@ function registerIpcHandlers(): void {
             }
           }, 3000)
         }
+        await writeTask
       }
 
       if (payload.raw) {
         // 用户正在直接操作终端时立即交出控制权，避免自动确认与手动按键竞争。
         markTrustGateReady(ptyId, 'first-terminal-input')
-        executeInput()
+        await executeInput()
         return { ok: true }
       }
 
       const trustGate = trustGatesByPtyId.get(ptyId)
-      if (trustGate?.deferUntilReady(executeInput, 'programmatic-session-input')) {
-        console.log(`[ipc] session:input deferred until trusted startup is ready: session=${payload.sessionId} ptyId=${ptyId}`)
-        return { ok: true, deferred: true }
-      }
-
-      executeInput()
+      await new Promise<void>((resolve, reject) => {
+        const execute = (): void => { void executeInput().then(resolve, reject) }
+        if (!trustGate?.deferUntilReady(execute, 'programmatic-session-input', () => reject(new Error('STALE_ATTEMPT')))) execute()
+      })
       return { ok: true }
     } catch (err) {
       console.error('[ipc] session:input failed:', err)
@@ -1398,6 +1366,7 @@ function registerIpcHandlers(): void {
   ) => {
     try {
       const ptyId = claudeToPtyMap.get(payload.sessionId) ?? payload.sessionId
+      managedRuntime.cancel(ptyId)
       // 先连发两次 Ctrl+C，让 Claude Code 优雅退出并写完 JSONL，再等 500ms 后强杀 PTY
       ptyManager.rawWrite(ptyId, '\x03\x03')
       await new Promise<void>((resolve) => setTimeout(resolve, 500))
@@ -1410,71 +1379,15 @@ function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle(IPC.SESSION_RESUME, async (
-    _event,
-    payload: { projectId: string; projectPath: string; resumeSessionId: string; permissionMode: PermissionMode }
-  ) => {
-    const sessionId = randomUUID()
+  ipcMain.handle(IPC.SESSION_RESUME, async (_event, payload: {
+    projectId: string; projectPath: string; resumeSessionId: string; permissionMode: PermissionMode
+  }) => {
     try {
-      const logWinState = (globalThis as Record<string, unknown>).__logMainWinState as ((tag: string) => void) | undefined
-      logWinState?.('SESSION_RESUME_begin')
-      createManagedTrustGate(sessionId, payload.projectPath)
-      logWinState?.('SESSION_RESUME_afterTrust')
-      ptyManager.resumeSession({
-        sessionId,
-        projectPath: payload.projectPath,
-        permissionMode: payload.permissionMode,
-        resumeSessionId: payload.resumeSessionId,
-        onData: (sid, data) => {
-          inspectTrustGate(sid, data)
-          sendToRenderers(IPC.SESSION_STATUS, { sessionId: sid, data })
-          termWindows.get(sid)?.webContents.send(IPC.TERM_DATA, data)
-        },
-        onExit: (sid, exitCode) => {
-          console.log(`[PtyManager] Session ${sid} exited with code ${exitCode}`)
-          disposeTrustGate(sid, `session-resume-exit:${exitCode}`)
-          sendToRenderers(IPC.SESSION_STATUS, { sessionId: sid, status: 'Completed' })
-          // PTY 退出时直接向渲染进程发 PTY_UNBIND（同上，避免 claudeToPtyMap lookup 失败）
-          const claudeId = ptyToClaudeMap.get(sid) ?? sid
-          sendToRenderers(IPC.PTY_UNBIND, { ptyId: sid, claudeId })
-          unbindPtyFromClaudeSession(claudeId)
-          termWindows.get(sid)?.webContents.send(IPC.TERM_DATA, '\r\n[进程已退出]\r\n')
-        },
-      })
-      logWinState?.('SESSION_RESUME_afterPtyStart')
-      // resume 的目标 Claude UUID 和 transcript 路径都已知，必须立即确定性绑定。
-      // 不能再按 cwd 猜 PTY：同一项目的 Branch 与多次 resume 会同时存在多个 PTY。
-      const transcriptPath = path.join(
-        resolveProjectDirectory(payload.projectPath),
-        `${payload.resumeSessionId}.jsonl`,
-      )
-      bindPtyToClaudeSession(
-        sessionId,
-        payload.resumeSessionId,
-        transcriptPath,
-        payload.projectPath,
-      )
-      // 恢复路径同样只预登记绑定，持续 tail 由 renderer 的 ProcessTimeline 租约接管。
-      const resumeWatcher = getJsonlWatcher()
-      const resumeConsumerId = `resume-bind:${sessionId}`
-      resumeWatcher.watchFile(
-        transcriptPath,
-        payload.resumeSessionId,
-        false,
-        undefined,
-        resumeConsumerId,
-      )
-      resumeWatcher.releaseSessionConsumer(payload.resumeSessionId, resumeConsumerId)
-      console.info(
-        `[PtyBind] Resume deterministic bind: Claude=${payload.resumeSessionId} PTY=${sessionId} transcript=${transcriptPath}`,
-      )
-      logWinState?.('SESSION_RESUME_afterWatch')
-      console.log(`[ipc] session:resume OK → ${sessionId}`)
-      return { ok: true, sessionId }
-    } catch (err) {
-      disposeTrustGate(sessionId, 'session-resume-failed')
-      console.error('[ipc] session:resume failed:', err)
-      return { ok: false, error: String(err) }
+      const session = managedRuntime.start(payload)
+      return { ok: true, sessionId: session.ptyId, launchId: session.launchId, attemptId: session.attemptId, frameId: session.frameId }
+    } catch (error) {
+      console.error('[ManagedRuntime] resume failed', error)
+      return { ok: false, error: String(error) }
     }
   })
 
@@ -1485,8 +1398,7 @@ function registerIpcHandlers(): void {
     payload: { claudeId: string; cwd: string; startedAt: number }
   ) => {
     try {
-      const encoded = payload.cwd.replace(/[^a-zA-Z0-9]/g, '-')
-      const claudeDir = path.join(os.homedir(), '.claude', 'projects', encoded)
+      const claudeDir = resolveProjectDirectory(payload.cwd)
       if (!fs.existsSync(claudeDir)) {
         fs.mkdirSync(claudeDir, { recursive: true })
       }
@@ -3039,6 +2951,7 @@ function registerIpcHandlers(): void {
 
   // 应用退出时标记，允许通知窗口真正关闭
   app.on('before-quit', () => {
+    managedRuntime.dispose()
     isAppQuitting = true
     historyService?.close()
     jsonlWatcher?.close()
@@ -3698,7 +3611,21 @@ async function startServices(): Promise<void> {
 
   try {
     await startHookServer(HOOK_PORT, {
-      onHookEvent: (payload) => {
+      onHookEvent: (payload, sourceToken) => {
+        const sourceSession = sourceToken ? managedRuntime.sourceSession(sourceToken) : undefined
+        if (sourceSession?.confirmedClaudeId && sourceSession.confirmedClaudeId !== payload.session_id
+            && payload.hook_event_name === 'SessionStart' && pendingBranchByPtySession.has(sourceSession.ptyId)
+            && path.resolve(sourceSession.cwd) === path.resolve(payload.cwd)) {
+          sendToRenderers(IPC.SESSION_BRANCH_LINK, { sessionId: sourceSession.ptyId, branchSessionId: payload.session_id, timestamp: Date.now() })
+          if (managedRuntime.confirmBranch(sourceSession.ptyId, sourceSession.confirmedClaudeId, payload.session_id)) {
+            pendingBranchByPtySession.delete(sourceSession.ptyId)
+            return
+          }
+        }
+        const managed = managedRuntime.acceptHook(payload, sourceToken)
+        // A supplied but expired source must never fall through to cwd heuristics.
+        if (sourceToken && !managed) return
+        if (managed && (payload.hook_event_name === 'SessionStart' || payload.hook_event_name === 'SessionEnd')) return
         // MCP 完整请求/返回先进入 Main 详情注册表，再广播轻量 Hook shell。
         // 这样 Renderer 在收到事件时已经拥有可按需读取的 DetailRef。
         const enrichedPayload = enrichMcpHookPayload(payload)
@@ -3745,14 +3672,17 @@ async function startServices(): Promise<void> {
             payload.session_id,
             payload.cwd,
             claudeToPtyMap,
-            (cwd) => ptyManager.findSessionByCwd(cwd) ?? undefined,
+            (cwd) => {
+              const candidate = ptyManager.findSessionByCwd(cwd)
+              return candidate && !managedCoordinator.getByPty(candidate) ? candidate : undefined
+            },
           )
           let ptyId = resolution.ptyId
           // fallback：findSessionByCwd 可能因 cwd 编码问题（Windows GBK mojibake）返回 null，
           // 此时查找唯一未绑定的活跃 PTY 作为 fallback（单 session 场景下精确匹配）
           if (!ptyId && !alreadyBound) {
             const activeSessions = ptyManager.getActiveSessions()
-            const unboundSessions = activeSessions.filter(sid => !ptyToClaudeMap.has(sid))
+            const unboundSessions = activeSessions.filter(sid => !ptyToClaudeMap.has(sid) && !managedCoordinator.getByPty(sid))
             if (unboundSessions.length === 1) {
               ptyId = unboundSessions[0]
               console.log(`[PtyBind] SessionStart hook: findSessionByCwd failed, using fallback unbound PTY=${ptyId}`)
@@ -3802,7 +3732,7 @@ async function startServices(): Promise<void> {
           // 其他 Hook：fallback 到 findSessionByCwd（兜底链路，多 Agent 场景可能仍返回错误 PTY，
           //            但这些 Hook 比 SessionEnd 晚到，此时 pendingBranchByPtySession 可能已被消费）
           const parentPtyId = ptyIdBeforeUnbind ?? ptyManager.findSessionByCwd(payload.cwd)
-          if (parentPtyId && parentPtyId !== payload.session_id) {
+          if (parentPtyId && parentPtyId !== payload.session_id && !managedCoordinator.getByPty(parentPtyId)) {
             const branchTs = pendingBranchByPtySession.get(parentPtyId)
             if (branchTs && Date.now() - branchTs < 120_000) {
               pendingBranchByPtySession.delete(parentPtyId)

@@ -1,7 +1,9 @@
 // 使用方法：项目/Session 生命周期边界调用 release*Runtime，诊断时调用 snapshotRuntimeResources
-// 编译说明：renderer 进程 browser bundle；纯 Jotai 状态事务，不触发 IPC
+// 编译说明：renderer 进程 browser bundle；维护 Jotai 资源状态，项目释放时通过 IPC 回收已结束的 managed 记录
 // 代码说明：集中管理运行态资源所有权，避免 atomFamily/Map 在组件卸载后继续持有大对象
 
+import { IPC } from '@shared/events/ipc-channels'
+import { managedSessionsAtom } from '../atoms/managed-sessions.atom'
 import type { TestStore } from '../../../__tests__/helpers/createTestStore'
 import { activeSessionsAtom, ptySessionIdsAtom, sessionByIdAtom } from '@renderer/atoms/session-core.atom'
 import { ptyBindingsAtom } from '@renderer/atoms/pty-binding.atom'
@@ -95,7 +97,8 @@ export function releaseSessionRuntime(
     && (session.status === 'Running' || session.status === 'Paused'),
   )
 
-  if (options.mode === 'handoff' && session && isTerminal(session.status) && !historyOwned) {
+  const managed = [...store.get(managedSessionsAtom).values()].find(item => item.confirmedClaudeId === sessionId)
+  if (options.mode === 'handoff' && session && isTerminal(session.status) && !historyOwned && (!managed || managed.transcriptState === 'ready')) {
     let ownerProjectId = session.projectId
     if (!ownerProjectId) {
       for (const projectState of store.get(historyProjectsAtom).values()) {
@@ -271,6 +274,12 @@ export function releaseProjectRuntime(
     })
   }
 
+  const endedLaunches = [...store.get(managedSessionsAtom).values()]
+    .filter(session => session.projectId === projectId && session.terminalState === 'exited' && session.lifecycle !== 'retry-pending')
+    .map(session => session.launchId)
+  if (endedLaunches.length > 0 && typeof window !== 'undefined' && window.api) {
+    void window.api.invoke(IPC.MANAGED_SESSION_RELEASE, endedLaunches).catch(error => console.error('[ManagedSession] release failed', error))
+  }
   clearHistoryProject(store, projectId)
   store.set(historyHandoffPendingAtom, (prev) => {
     if (!prev.has(projectId)) return prev

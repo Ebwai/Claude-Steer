@@ -17,7 +17,7 @@ export interface TrustGateOptions {
 export interface TrustGate {
   readonly state: TrustGateState
   inspect(data: string): boolean
-  deferUntilReady(action: () => void, label: string): boolean
+  deferUntilReady(action: () => void, label: string, cancel?: () => void): boolean
   markReady(reason: string): void
   dispose(reason: string): void
 }
@@ -50,7 +50,7 @@ function isInputPromptReady(text: string): boolean {
 export function createTrustGate(options: TrustGateOptions): TrustGate {
   let state: TrustGateState = 'armed'
   let startupBuffer = ''
-  const pendingActions: Array<{ action: () => void; label: string }> = []
+  const pendingActions: Array<{ action: () => void; label: string; cancel?: () => void }> = []
 
   try {
     const preTrust = options.preTrust ?? ensureProjectTrusted
@@ -113,9 +113,9 @@ export function createTrustGate(options: TrustGateOptions): TrustGate {
       return true
     },
 
-    deferUntilReady(action: () => void, label: string): boolean {
+    deferUntilReady(action: () => void, label: string, cancel?: () => void): boolean {
       if (state !== 'armed' && state !== 'handled') return false
-      pendingActions.push({ action, label })
+      pendingActions.push({ action, label, cancel })
       console.log(
         `[TrustGate] deferred startup action: session=${options.sessionId} label=${label} state=${state} pending=${pendingActions.length}`,
       )
@@ -131,7 +131,7 @@ export function createTrustGate(options: TrustGateOptions): TrustGate {
       const droppedActions = pendingActions.length
       state = 'disposed'
       startupBuffer = ''
-      pendingActions.length = 0
+      for (const pending of pendingActions.splice(0)) pending.cancel?.()
       console.log(
         `[TrustGate] disposed: session=${options.sessionId} reason=${reason} droppedActions=${droppedActions}`,
       )

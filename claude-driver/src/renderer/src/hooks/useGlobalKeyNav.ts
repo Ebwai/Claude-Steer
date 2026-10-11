@@ -2,6 +2,7 @@
 // 编译说明：renderer 进程 browser bundle
 
 import { useEffect, useCallback, useRef } from 'react'
+import { resolveContentSessionId, resolveFrameId } from '../capabilities/managedSessionCapability'
 import { useStore } from 'jotai'
 import type { ReactFlowInstance } from '@xyflow/react'
 import { focusedSessionIdAtom, nodeJumpRequestAtom } from '../atoms/viewport.atom'
@@ -65,25 +66,27 @@ export function useGlobalKeyNav(
     const focusedId = store.get(focusedSessionIdAtom) ?? layouts[0]?.sessionId
     if (!focusedId) return
 
-    const timelineNodes = store.get(timelineBySessionAtom(focusedId))
-    const insertions = store.get(lineInsertionsBySessionAtom(focusedId))
+    const contentId = resolveContentSessionId(store, focusedId)
+    if (!contentId) return
+    const timelineNodes = store.get(timelineBySessionAtom(contentId))
+    const insertions = store.get(lineInsertionsBySessionAtom(contentId))
     const jumpable = buildJumpableNodes(timelineNodes, insertions)
     if (jumpable.length === 0) return
 
-    const cur = store.get(cursorNodeIndexAtom(focusedId))
+    const cur = store.get(cursorNodeIndexAtom(contentId))
     const next = key === 'ArrowDown'
       ? Math.min(cur < 0 ? 0 : cur + 1, jumpable.length - 1)
       : Math.max(cur < 0 ? jumpable.length - 1 : cur - 1, 0)
     const target = jumpable[next]
     if (!target) return
 
-    store.set(cursorNodeIndexAtom(focusedId), next)
+    store.set(cursorNodeIndexAtom(contentId), next)
     const userInputs = timelineNodes.filter((node) => node.type === 'user_input')
     if (target.type === 'user_input') {
       const userInputIndex = userInputs.findIndex((node) => node.id === target.id)
-      if (userInputIndex >= 0) store.set(scrubberIndexAtom(focusedId), userInputIndex)
+      if (userInputIndex >= 0) store.set(scrubberIndexAtom(contentId), userInputIndex)
     }
-    store.set(nodeJumpRequestAtom, { sessionId: focusedId, nodeId: target.id, ts: Date.now() })
+    store.set(nodeJumpRequestAtom, { sessionId: contentId, nodeId: target.id, ts: Date.now() })
     console.log(`[KeyNav] ↑↓ cursor=${next} nodeId=${target.id.slice(0, 8)} type=${target.type}`)
 
     requestAnimationFrame(() => {
@@ -176,7 +179,10 @@ export function useGlobalKeyNav(
       const currentId = store.get(focusedSessionIdAtom) ?? layouts[0]?.sessionId
       if (!currentId) return
       const direction = event.key === 'ArrowLeft' ? 'left' : 'right'
-      const relations = store.get(sessionRelationsAtom)
+      const relations = new Map([...store.get(sessionRelationsAtom)].map(([id, relation]) => [
+        resolveFrameId(store, id),
+        { ...relation, parentSessionId: relation.parentSessionId ? resolveFrameId(store, relation.parentSessionId) : undefined }
+      ]))
       const nextId = resolveHistoryHorizontalTarget(currentId, direction, layouts, relations)
       if (nextId) {
         console.log(`[KeyNav] ←→ ${currentId.slice(0, 8)} → ${nextId.slice(0, 8)} (${direction})`)

@@ -78,7 +78,7 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
   const { sessionId, ptyId, agentLabel, agentColor, source, detailsState } = data
   const activeSessions = useAtomValue(activeSessionsAtom)
   const session = activeSessions.get(sessionId) ?? data.session
-  const setHeight = useSetAtom(sessionFrameHeightsAtom(sessionId))
+  const setHeight = useSetAtom(sessionFrameHeightsAtom(id))
   const setAllHeights = useSetAtom(allFrameHeightsAtom)
   const { updateNodeData } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
@@ -126,7 +126,7 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
       // 同步写入全量 Map atom，使 ProcessLineCanvas 订阅到变化触发布局重算。
       setAllHeights((prev) => {
         const next = new Map(prev)
-        next.set(sessionId, h)
+        next.set(id, h)
         return next
       })
       updateNodeData(id, { estimatedHeight: h })
@@ -340,7 +340,9 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
             </div>
           )
         })}
-        {source === 'history' && detailsState !== 'resident' ? (
+        {session?.isPtyPlaceholder ? (
+          <div className="sfn-history-shell">{isCompleted ? t('projectMonitor.canvas.historyLoadFailed') : t('projectMonitor.leftPanel.starting')}</div>
+        ) : source === 'history' && detailsState !== 'resident' ? (
           <div className={`sfn-history-shell sfn-history-shell-${detailsState}`}>
             {detailsState === 'hydrating'
               ? t('projectMonitor.canvas.historyLoading')
@@ -377,6 +379,7 @@ function SessionFrameNode({ id, data, selected }: SessionFrameNodeProps): React.
         <button
           className="sfn-btn sfn-btn-resume"
           onClick={() => { void handleResume() }}
+          disabled={Boolean(session?.isPtyPlaceholder)}
           title={t('projectMonitor.canvas.resumeTooltip')}
         >
           {t('projectMonitor.canvas.backToConversation')}

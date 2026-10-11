@@ -8,7 +8,7 @@ import http from 'http'
 import type { HookPayload, StatusLineData } from '../../../shared/types/index'
 
 export interface HookServerHandlers {
-  onHookEvent: (payload: HookPayload) => void
+  onHookEvent: (payload: HookPayload, sourceToken?: string) => void
   onStatusLine: (data: StatusLineData) => void
   onPortConflict: (port: number) => void
   onError: (err: Error) => void
@@ -72,7 +72,8 @@ export function startHookServer(
         // Claude Code Hook 事件
         console.log(`[HookServer] Received /hooks request, payload keys: ${Object.keys(body as Record<string, unknown>).join(',')}`)
         try {
-          handlers.onHookEvent(body as HookPayload)
+          const sourceToken = req.headers['x-steer-hook-token']
+          handlers.onHookEvent(body as HookPayload, typeof sourceToken === 'string' ? sourceToken : undefined)
           sendJson(res, 200, { ok: true })
         } catch (err) {
           console.error('[HookServer] onHookEvent handler error:', err)

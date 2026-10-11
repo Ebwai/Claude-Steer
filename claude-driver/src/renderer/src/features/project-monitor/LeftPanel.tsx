@@ -3,10 +3,10 @@
 // 代码说明：项目监控左半面板——执行计划折叠区 + 当前工作情况 + 消息输入行
 
 import React, { useCallback } from 'react'
-import { useAtomValue, useStore } from 'jotai'
+import { useAtomValue } from 'jotai'
 import { activeProjectIdAtom, projectByIdAtom } from '../../atoms/projects.atom'
 import { ptySessionIdsAtom, ptyBindingsAtom, agentBlocksAtom, agentLabelsAtom } from '../../atoms/sessions.atom'
-import { activeSessionsAtom } from '../../atoms/session-core.atom'
+import { displaySessionsAtom as activeSessionsAtom } from '../../atoms/managed-sessions.atom'
 import { IPC } from '@shared/events/ipc-channels'
 import { pendingPtyStartsAtom } from '../../atoms/pending-starts.atom'
 import { pathMatches } from '@renderer/utils/pathUtils'
@@ -19,7 +19,6 @@ import './LeftPanel.css'
 
 function LeftPanel(): React.JSX.Element {
   const { t } = useT()
-  const store          = useStore()
   const activeId       = useAtomValue(activeProjectIdAtom)
   const project        = useAtomValue(projectByIdAtom(activeId ?? ''))
   const activeSessions  = useAtomValue(activeSessionsAtom)
@@ -49,7 +48,7 @@ function LeftPanel(): React.JSX.Element {
   }
 
   // pending 中有该项目路径 → 已发出 SESSION_START，等待 SessionStart Hook 创建 entry
-  const hasPendingStart = project ? pendingPtyStarts.has(project.path) : false
+  const hasPendingStart = project ? [...pendingPtyStarts.values()].some(pending => pending.projectId === project.id) : false
   // isActiveSession：有活跃 session 或有 pending，决定隐藏"启动"按钮
   const isActiveSession = projectSessions.length > 0 || hasPendingStart
 
@@ -67,16 +66,12 @@ function LeftPanel(): React.JSX.Element {
 
       if (result.ok && result.sessionId) {
         // 只写 pending，等 SessionStart Hook 到达后 sessionLifecycle 以 claudeId 创建正式 entry
-        store.set(pendingPtyStartsAtom, (prev) => {
-          const m = new Map(prev)
-          m.set(project.path, { ptyId: result.sessionId!, projectId: project.id })
-          return m
-        })
+        // Pending ownership is supplied by Main managed events; a late invoke result must not recreate it.
       }
     } catch (err) {
       console.error('[LeftPanel] start session failed:', err)
     }
-  }, [project, hasPendingStart, store])
+  }, [project, hasPendingStart])
 
   if (!project) {
     return (
@@ -104,9 +99,9 @@ function LeftPanel(): React.JSX.Element {
             // Map key 已是 claudeId，直接查；fallback 用 ptyToClaudeMap 或 CWD 匹配
             const claudeId = sess.claudeId ?? ptyBindings.ptyToClaudeMap.get(sess.id)
             const block = (claudeId ? agentBlocks.get(claudeId) : undefined)
-              ?? Array.from(agentBlocks.values()).find(
+              ?? (!sess.frameId ? Array.from(agentBlocks.values()).find(
                 (b) => b.sessionCwd && pathMatches(sess.cwd, b.sessionCwd)
-              )
+              ) : undefined)
               ?? {
                 sessionId: sess.id,
                 sessionCwd: sess.cwd,
@@ -122,7 +117,7 @@ function LeftPanel(): React.JSX.Element {
             const label = agentLabels.get(sessClaudeId) ?? (idx === 0 ? t('projectMonitor.leftPanel.mainline') : t('projectMonitor.leftPanel.agentLabel', { index: idx + 1 }))
             return (
               <AgentBlock
-                key={sess.claudeId ?? sess.id}
+                key={sess.frameId ?? sess.claudeId ?? sess.id}
                 session={sess}
                 block={block}
                 agentLabel={label}

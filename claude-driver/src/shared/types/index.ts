@@ -79,6 +79,8 @@ export interface TokenUsage {
 }
 
 export interface Session {
+  /** Stable visual frame identity, independent of process retries. */
+  frameId?: string
   /** 当前 PTY UUID（每次 resume 会变；PTY 操作和 IPC 调用使用此字段） */
   id: string
   /** Claude Code 内部 session UUID（跨 resume 永远不变；activeSessionsAtom Map key、node.id、历史保存均使用此值） */
@@ -98,7 +100,7 @@ export interface Session {
   endedAt: number | null
   /** 关联的 Git Worktree 路径（非 Git 项目为 null） */
   worktreePath: string | null
-  /** 真实 Claude UUID 尚未产生时的临时 PTY 会话；仅供实时输入，不得进入历史画布。 */
+  /** 尚未确认 Claude 身份的临时会话；两侧可显示轻量工作框，不得作为真实历史内容身份。 */
   isPtyPlaceholder?: boolean
 }
 
